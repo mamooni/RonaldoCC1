@@ -34,7 +34,7 @@ Sessions are opaque random tokens stored (hashed) in SQLite and sent to the
 browser in an HttpOnly, SameSite=Lax cookie. Passwords are hashed with
 scrypt and a per-user salt — never stored in the clear.
 
-What is deliberately simple, because this is a learning/demo project:
+Operational notes:
 
   * single-process, threaded server; SQLite in WAL mode
   * in-memory rate limiting (resets when the process restarts)
@@ -52,6 +52,7 @@ import mimetypes
 import os
 import re
 import secrets
+import smtplib
 import sqlite3
 import time
 import urllib.request
@@ -63,6 +64,7 @@ from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote
+from email.message import EmailMessage
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -100,7 +102,6 @@ MYSQL = {
 
 SESSION_COOKIE = "nl_session"
 SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
-
 RESET_TTL = 60 * 60  # reset links expire after one hour
 
 # Optional production integrations. Keep secrets in the environment, never in
@@ -265,6 +266,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    used_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS reset_tokens_user ON password_reset_tokens(user_id);
 
 -- postcode lookups are cached so a repeated check costs no API credit
 CREATE TABLE IF NOT EXISTS postcodes (
@@ -683,11 +692,12 @@ def prune_sessions(conn):
     """Drop sessions that have expired; called on boot and after each login."""
     now = int(time.time())
     removed = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,)).rowcount
+    conn.execute("DELETE FROM password_reset_tokens WHERE expires_at < ? OR used_at IS NOT NULL", (now,))
     conn.execute("DELETE FROM audit WHERE at < ?", (now - 180 * 24 * 3600,))
     return removed
 
 
-MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes")
+MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes", "password_reset_tokens")
 
 
 def init_mysql():
@@ -1143,6 +1153,82 @@ def validate_signup(payload):
     return {"username": username, "email": email, "password": password}, errors
 
 
+def valid_new_password(password: str):
+    """Return a client-safe validation message, or an empty string."""
+    if len(password) < MIN_PASSWORD:
+        return f"Use at least {MIN_PASSWORD} characters."
+    if not re.search(r"[A-Za-z]", password):
+        return "Add at least one letter."
+    if not re.search(r"\d", password):
+        return "Add at least one number."
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return "Add at least one symbol."
+    if len(password) > 1024:
+        return "That password is too long."
+    return ""
+
+
+def verify_turnstile(token: str, remote_ip: str) -> bool:
+    """Verify a Turnstile token at the provider; fail closed when configured."""
+    if not TURNSTILE_SECRET:
+        return True
+    if not token or len(token) > 4096:
+        return False
+    body = urllib.parse.urlencode({
+        "secret": TURNSTILE_SECRET, "response": token, "remoteip": remote_ip
+    }).encode("utf-8")
+    try:
+        request = urllib.request.Request(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST"
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return bool(json.loads(response.read().decode("utf-8")).get("success"))
+    except (urllib.error.URLError, ValueError, TimeoutError):
+        return False
+
+
+def send_reset_email(address: str, link: str) -> bool:
+    """Deliver a reset link through Resend or configured SMTP."""
+    subject = "Reset your Northlight password"
+    text = (
+        "Someone requested a password reset for your Northlight account.\n\n"
+        f"Use this link within one hour: {link}\n\n"
+        "If this was not you, you can safely ignore this email."
+    )
+    if RESEND_API_KEY and RESEND_FROM:
+        try:
+            body = json.dumps({"from": RESEND_FROM, "to": [address], "subject": subject, "text": text}).encode("utf-8")
+            request = urllib.request.Request(
+                "https://api.resend.com/emails", data=body,
+                headers={"Authorization": "Bearer " + RESEND_API_KEY, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return 200 <= response.status < 300
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            print("  password reset email via Resend failed:", error)
+            return False
+    if not (SMTP_HOST and SMTP_FROM):
+        print("  password reset email not sent: configure NL_RESEND_API_KEY and NL_RESEND_FROM")
+        return False
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = SMTP_FROM
+    message["To"] = address
+    message.set_content(text)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+            smtp.starttls()
+            if SMTP_USER:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException) as error:
+        print("  password reset email failed:", error)
+        return False
+
+
 # --------------------------------------------------------------------------
 # Rate limiting (in memory, per IP)
 # --------------------------------------------------------------------------
@@ -1275,7 +1361,8 @@ CONTENT_TYPES = {
 
 BASE_CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-    "script-src 'self'; connect-src 'self'; font-src 'self' data:; "
+    "script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; "
+    "connect-src 'self' https://challenges.cloudflare.com; font-src 'self' data:; "
     "object-src 'none'; base-uri 'none'; form-action 'self'"
 )
 # the standalone preview files carry a small inline script of their own
@@ -1284,6 +1371,8 @@ PREVIEW_CSP = BASE_CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-i
 POST_ROUTES = {
     "/api/signup": "api_signup",
     "/api/login": "api_login",
+    "/api/password-reset/request": "api_password_reset_request",
+    "/api/password-reset/confirm": "api_password_reset_confirm",
     "/api/logout": "api_logout",
     "/api/account/email": "api_account_email",
     "/api/account/password": "api_account_password",
@@ -1552,6 +1641,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/me":
             return self.api_me()
+        if path == "/api/public-config":
+            return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
         if path == "/api/orders":
             return self.api_orders()
         if path == "/api/payments":
@@ -1611,6 +1702,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_signup(self, payload):
         values, errors = validate_signup(payload)
+        if not verify_turnstile(str(payload.get("turnstile_token", "")), self.client_address[0]):
+            errors["captcha"] = "Human verification failed. Please try again."
         if errors:
             return self._json(
                 400, {"error": "Please fix the highlighted fields.", "fields": errors}
@@ -1672,6 +1765,53 @@ class Handler(BaseHTTPRequestHandler):
             "balance": dollars(NEW_USER_CENTS),
         }
         return self._json(201, {"user": user}, [self._session_cookie(token)])
+
+    def api_password_reset_request(self, payload):
+        """Issue a one-use, short-lived reset token without leaking account existence."""
+        email = str(payload.get("email", "")).strip().lower()
+        # Always return this response: attackers cannot use this form to list users.
+        response = {"ok": True, "message": "If that email belongs to an account, a reset link has been sent."}
+        if len(email) > 254 or not EMAIL_RE.match(email):
+            return self._json(200, response)
+        with db() as conn:
+            user = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
+        if user is None:
+            return self._json(200, response)
+
+        token = secrets.token_urlsafe(32)
+        now = int(time.time())
+        with db(write=True) as conn:
+            conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user["id"],))
+            conn.execute(
+                "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+                (token_hash(token), user["id"], now + RESET_TTL),
+            )
+            audit(conn, "password_reset.requested", actor={"id": user["id"]}, target="account", ip=self.client_address[0])
+        base = PUBLIC_BASE_URL or ("https" if HTTPS_ONLY else "http") + "://" + self.headers.get("Host", "localhost")
+        send_reset_email(user["email"], base + "/reset-password.html?token=" + quote(token, safe=""))
+        return self._json(200, response)
+
+    def api_password_reset_confirm(self, payload):
+        token = str(payload.get("token", ""))
+        password = str(payload.get("password", ""))
+        message = valid_new_password(password)
+        if not token or len(token) > 512:
+            return self._json(400, {"error": "This reset link is invalid or has expired."})
+        if message:
+            return self._json(400, {"error": "Please fix the highlighted field.", "fields": {"password": message}})
+        now = int(time.time())
+        with db(write=True) as conn:
+            row = conn.execute(
+                "SELECT user_id FROM password_reset_tokens WHERE token_hash = ? AND expires_at >= ? AND used_at IS NULL",
+                (token_hash(token), now),
+            ).fetchone()
+            if row is None:
+                return self._json(400, {"error": "This reset link is invalid or has expired."})
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), row["user_id"]))
+            conn.execute("UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ?", (now, token_hash(token)))
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+            audit(conn, "password_reset.completed", actor={"id": row["user_id"]}, target="account", ip=self.client_address[0])
+        return self._json(200, {"ok": True})
 
     def api_login(self, payload):
         username = str(payload.get("username", "")).strip()

@@ -1,9 +1,4 @@
-/* ==========================================================================
-   Northlight storefront — signup.js
-   Client-side validation for the sign-up form (demo only — nothing is sent).
 
-   The particle background and the password toggle live in auth.js.
-   ========================================================================== */
 
 (function () {
   "use strict";
@@ -12,7 +7,7 @@
     return (scope || document).querySelector(selector);
   }
 
-  /* --------------------- 3. Validation (demo only) ------------------------ */
+  
 
   var form = $("#signupForm");
   if (!form) return;
@@ -30,6 +25,7 @@
   }
 
   var captcha = $("#captchaCheck");
+  var turnstileToken = "";
   var submit = $("#signupSubmit");
   var status = $("#authStatus");
 
@@ -105,7 +101,12 @@
   function checkCaptcha() {
     var errorNode = $("#captchaError");
 
-    if (!captcha.checked) {
+    if (window.NL_TURNSTILE_ENABLED && !turnstileToken) {
+      errorNode.textContent = "Please complete the human verification.";
+      errorNode.hidden = false;
+      return false;
+    }
+    if (!window.NL_TURNSTILE_ENABLED && !captcha.checked) {
       errorNode.textContent = "Please confirm you're not a robot.";
       errorNode.hidden = false;
       return false;
@@ -132,6 +133,31 @@
     if (captcha.checked) checkCaptcha();
     status.hidden = true;
   });
+
+  // The public key is fetched from our own server so it is never hard-coded
+  // into the template. If Turnstile is not configured, the visible checkbox
+  // remains a local development aid only.
+  fetch("/api/public-config")
+    .then(function (response) { return response.ok ? response.json() : {}; })
+    .then(function (config) {
+      if (!config.turnstile_site_key) return;
+      window.NL_TURNSTILE_ENABLED = true;
+      captcha.closest(".captcha__row").style.display = "none";
+      var widget = document.createElement("div");
+      widget.className = "cf-turnstile";
+      widget.dataset.sitekey = config.turnstile_site_key;
+      widget.dataset.callback = "northlightTurnstileDone";
+      widget.dataset["expiredCallback"] = "northlightTurnstileExpired";
+      $("#captcha").insertBefore(widget, $("#captchaError"));
+      window.northlightTurnstileDone = function (token) { turnstileToken = token; checkCaptcha(); };
+      window.northlightTurnstileExpired = function () { turnstileToken = ""; };
+      var script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    })
+    .catch(function () { /* local previews do not have the API */ });
 
   var FIELD_NODES = {
     username: [username, "#usernameError"],
@@ -207,6 +233,7 @@
       username: username.value.trim(),
       email: email.value.trim(),
       password: password.value,
+      turnstile_token: turnstileToken,
     })
       .then(function (result) {
         if (result.ok) {
