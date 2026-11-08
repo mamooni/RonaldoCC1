@@ -101,6 +101,23 @@ MYSQL = {
 SESSION_COOKIE = "nl_session"
 SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
 
+RESET_TTL = 60 * 60  # reset links expire after one hour
+
+# Optional production integrations. Keep secrets in the environment, never in
+# HTML or source control. NL_TURNSTILE_SITE_KEY is safe to expose to browsers;
+# NL_TURNSTILE_SECRET and SMTP credentials are not.
+TURNSTILE_SITE_KEY = os.environ.get("NL_TURNSTILE_SITE_KEY", "").strip()
+TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
+SMTP_HOST = os.environ.get("NL_SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("NL_SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("NL_SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("NL_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("NL_SMTP_FROM", "").strip()
+RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("NL_RESEND_FROM", "").strip()
+PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
+
+
 MAX_BODY = 8 * 1024       # 8 KB is plenty for these forms
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
 
