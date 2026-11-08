@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Create your account — Northlight</title>
+    <meta
+      name="description"
+      content="Create a Northlight account. Demo sign-up page — no data is sent anywhere."
+    />
+    <link rel="stylesheet" href="assets/css/auth.css" />
+  </head>
+
+  <body class="auth">
+    <!-- ===================== Animated particle field ===================== -->
+    <!-- Drawn by signup.js. It stops on its own when the OS asks for reduced
+         motion (a single still frame is painted instead). -->
+    <canvas class="auth__canvas" id="authCanvas" aria-hidden="true"></canvas>
+
+    <!-- ========================= Background slot ==========================
+         The particles above are only the default background. Drop your own
+         artwork in by uncommenting this block and pointing src at your image —
+         the particle field switches itself off as soon as this element exists.
+
+      <div class="auth__media" aria-hidden="true">
+        <img class="auth__media-img" src="background.jpg" alt="" />
+      </div>
+
+    ===================================================================== -->
+
+    <main class="auth__main">
+      <section class="auth-card">
+        <!-- ========================== Logo slot ==========================
+             Swap the .logo-ph placeholder for the commented <img> below once
+             you have your own logo file. -->
+        <a class="auth-card__logo" href="index.html" aria-label="Northlight home">
+          <div class="logo-ph" aria-hidden="true"></div>
+
+          <img class="auth-card__logo-img" src="logo.png" alt="Northlight" />
+        </a>
+
+        <form class="auth-form" id="signupForm" novalidate>
+          <!-- username -->
+          <div class="field">
+            <label class="sr-only" for="username">Username</label>
+            <input
+              class="field__input"
+              id="username"
+              name="username"
+              type="text"
+              placeholder="Enter Username"
+              autocomplete="username"
+              spellcheck="false"
+              aria-describedby="usernameError"
+            />
+            <p class="field__error" id="usernameError" hidden></p>
+          </div>
+
+          <!-- email -->
+          <div class="field">
+            <label class="sr-only" for="email">Email</label>
+            <input
+              class="field__input"
+              id="email"
+              name="email"
+              type="email"
+              placeholder="Enter Valid Email"
+              autocomplete="email"
+              spellcheck="false"
+              aria-describedby="emailError"
+            />
+            <p class="field__error" id="emailError" hidden></p>
+          </div>
+
+          <!-- password -->
+          <div class="field">
+            <label class="sr-only" for="password">Password</label>
+            <div class="field__wrap">
+              <input
+                class="field__input field__input--password"
+                id="password"
+                name="password"
+                type="password"
+                placeholder="Enter Password"
+                autocomplete="new-password"
+                aria-describedby="passwordHint passwordError"
+              />
+              <button
+                class="field__eye"
+                type="button"
+                id="passwordToggle"
+                aria-label="Show password"
+                aria-pressed="false"
+              >
+                <svg
+                  class="field__eye-open"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12S18 18.5 12 18.5 2.5 12 2.5 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg
+                  class="field__eye-shut"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 3l18 18" />
+                  <path d="M10.6 6.1A9.9 9.9 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-2.7 3.4" />
+                  <path d="M6.5 7.6A16.8 16.8 0 0 0 2.5 12S6 18 12 18a9.7 9.7 0 0 0 3.7-.7" />
+                </svg>
+              </button>
+            </div>
+            <p class="field__hint" id="passwordHint">
+              Password must use 8+ characters with a mix of letters, numbers, and
+              symbols.
+            </p>
+            <p class="field__error" id="passwordError" hidden></p>
+          </div>
+
+          <!-- demo "not a robot" check -->
+          <div class="captcha" id="captcha">
+            <label class="captcha__row">
+              <span class="captcha__box">
+                <input class="captcha__input" type="checkbox" id="captchaCheck" />
+                <span class="captcha__tick" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m4 12.5 5 5L20 6.5" />
+                  </svg>
+                </span>
+              </span>
+              <span class="captcha__label">I'm not a robot</span>
+              <span class="captcha__mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20.5 12a8.5 8.5 0 1 1-2.9-6.4" />
+                  <path d="M20.5 4v4.5H16" />
+                </svg>
+              </span>
+            </label>
+            <p class="captcha__brand">Protected by <b>Demo Verify</b></p>
+            <p class="field__error" id="captchaError" hidden></p>
+          </div>
+
+          <!-- remember me -->
+          <label class="remember" for="remember">
+            <input class="remember__input" type="checkbox" id="remember" />
+            <span class="remember__dot" aria-hidden="true"></span>
+            <span class="remember__text">Remember me</span>
+          </label>
+
+          <button class="auth-submit" type="submit" id="signupSubmit">Sign Up</button>
+        </form>
+
+        <p class="auth-status" id="authStatus" role="status" hidden></p>
+
+        <p class="auth-alt">Already member? <a href="login.html">Login</a></p>
+      </section>
+    </main>
+
+    <script src="assets/js/auth.js" defer></script>
+    <script src="assets/js/signup.js" defer></script>
+  </body>
+</html>

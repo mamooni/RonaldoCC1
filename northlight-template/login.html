@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — Northlight</title>
+    <meta
+      name="description"
+      content="Sign in to your Northlight account. Demo login page — no data is sent anywhere."
+    />
+    <link rel="stylesheet" href="assets/css/auth.css" />
+  </head>
+
+  <body class="auth">
+    <!-- ===================== Animated particle field ===================== -->
+    <canvas class="auth__canvas" id="authCanvas" aria-hidden="true"></canvas>
+
+    <!-- ========================= Background slot ==========================
+         Swap the particles for your own artwork by uncommenting this block and
+         pointing src at your image — auth.js removes the canvas as soon as this
+         element exists.
+
+      <div class="auth__media" aria-hidden="true">
+        <img class="auth__media-img" src="background.jpg" alt="" />
+      </div>
+
+    ===================================================================== -->
+
+    <main class="auth__main">
+      <section class="auth-card">
+        <!-- ========================== Logo slot ==========================
+             Swap the .logo-ph placeholder for the commented <img> below. -->
+        <a class="auth-card__logo" href="index.html" aria-label="Northlight home">
+
+
+          <img class="auth-card__logo-img" src="logo.png" alt="Northlight" /> 
+        </a>
+
+        <form class="auth-form" id="loginForm" novalidate>
+          <!-- username -->
+          <div class="field">
+            <label class="sr-only" for="username">Username</label>
+            <input
+              class="field__input"
+              id="username"
+              name="username"
+              type="text"
+              placeholder="Enter Username"
+              autocomplete="username"
+              spellcheck="false"
+              aria-describedby="usernameError"
+            />
+            <p class="field__error" id="usernameError" hidden></p>
+          </div>
+
+          <!-- password -->
+          <div class="field">
+            <label class="sr-only" for="password">Password</label>
+            <div class="field__wrap">
+              <input
+                class="field__input field__input--password"
+                id="password"
+                name="password"
+                type="password"
+                placeholder="Enter Password"
+                autocomplete="current-password"
+                aria-describedby="passwordError"
+              />
+              <button
+                class="field__eye"
+                type="button"
+                id="passwordToggle"
+                aria-label="Show password"
+                aria-pressed="false"
+              >
+                <svg
+                  class="field__eye-open"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12S18 18.5 12 18.5 2.5 12 2.5 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg
+                  class="field__eye-shut"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 3l18 18" />
+                  <path d="M10.6 6.1A9.9 9.9 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-2.7 3.4" />
+                  <path d="M6.5 7.6A16.8 16.8 0 0 0 2.5 12S6 18 12 18a9.7 9.7 0 0 0 3.7-.7" />
+                </svg>
+              </button>
+            </div>
+            <p class="field__error" id="passwordError" hidden></p>
+          </div>
+
+          <!-- remember me + forgot password -->
+          <div class="auth-row">
+            <label class="remember" for="remember">
+              <input class="remember__input" type="checkbox" id="remember" />
+              <span class="remember__dot" aria-hidden="true"></span>
+              <span class="remember__text">Remember me</span>
+            </label>
+            <a class="auth-forgot" href="#">Forgot password?</a>
+          </div>
+
+          <button class="auth-submit" type="submit" id="loginSubmit">Sign In</button>
+        </form>
+
+        <p class="auth-status" id="authStatus" role="status" hidden></p>
+
+        <p class="auth-alt">Not a member? <a href="signup.html">Sign up</a></p>
+      </section>
+    </main>
+
+    <script src="assets/js/auth.js" defer></script>
+    <script src="assets/js/login.js" defer></script>
+  </body>
+</html>

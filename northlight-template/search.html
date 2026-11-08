@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Search goods — Northlight</title>
+    <meta
+      name="description"
+      content="Search the Northlight catalogue by country, creator, licence and price."
+    />
+    <link rel="stylesheet" href="assets/css/styles.css" />
+  </head>
+
+  <body data-requires-auth>
+    <!-- ============================ Top bar ============================ -->
+    <header class="topbar">
+      <div class="topbar__inner">
+        <!-- ===== LOGO (left) ==================================================
+             Replace the dashed placeholder below with your own image:
+
+                 <img src="logo.png" alt="Your store" class="topbar__logo-img" />
+
+             PNG or SVG, any shape. It is centred vertically and scaled to fit
+             the header height (--header-height in styles.css).
+             ================================================================== -->
+        <a class="topbar__logo" href="index.html" aria-label="Home">
+
+        <img src="logo.png" alt="Your store" class="topbar__logo-img" />
+
+
+        <!-- ===== CENTRE: balance + wallet ================================== -->
+        <div class="topbar__center">
+          <a class="wallet" href="deposit.html" aria-label="Wallet balance">
+            <span class="wallet__cur">$</span>
+            <span class="js-balance">0.00</span>
+          </a>
+          <a class="btn btn--wallet" href="deposit.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+            </svg>
+            <span class="btn__label">Wallet</span>
+          </a>
+        </div>
+
+        <!-- ===== RIGHT: messages, cart, profile ============================ -->
+        <div class="topbar__actions">
+          <a class="icon-btn" href="messages.html" aria-label="Messages">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v2.2l8 5 8-5V6H4Zm16 5.9-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 11.9V18h16v-6.1Z"/>
+            </svg>
+          </a>
+
+          <a class="icon-btn" href="cart.html" aria-label="Shopping cart" id="cartBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M7 4a3 3 0 0 1 10 0h2.5a1 1 0 0 1 1 .9l1 12A2 2 0 0 1 19.5 19h-15a2 2 0 0 1-2-2.1l1-12a1 1 0 0 1 1-.9H7Zm2 0h6a1 1 0 0 0-2-2h-2a1 1 0 0 0-2 2Z"/>
+            </svg>
+            <span class="badge" id="cartCount" hidden>0</span>
+          </a>
+
+          <div class="menu" data-menu>
+            <button class="avatar" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu">SU</button>
+            <div
+              class="menu__panel menu__panel--account menu__panel--right"
+              id="accountMenu"
+              hidden
+            >
+              <!-- who is signed in: name, then the address on file -->
+              <div class="acct__head" data-user>
+                <p class="acct__name" id="menuUsername">search.user</p>
+                <p class="acct__email" id="menuEmail">search.user@example.com</p>
+              </div>
+
+              <a class="acct__item" href="settings.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+                <span>My Account</span>
+              </a>
+
+              <a class="acct__item" href="activity.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.6v5"/><path d="M12 16.2h.01"/></svg>
+                <span>Your Activities</span>
+              </a>
+
+              <a class="acct__item" href="#" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0"/><path d="M16.5 5.4a3.2 3.2 0 0 1 0 5.9"/><path d="M18 13.6a6.2 6.2 0 0 1 3.2 5.9"/></svg>
+                <span>Referral Program</span>
+              </a>
+
+              <a class="acct__item" href="support.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.4a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.1-2.5 3.9"/><path d="M12 17.2h.01"/></svg>
+                <span>Support</span>
+              </a>
+
+              <button class="acct__item" type="button" id="signOutBtn" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16.5 5.5 12 10 7.5"/><path d="M5.5 12H15"/></svg>
+                <span>Sign out</span>
+              </button>
+
+              <a class="acct__item acct__item--admin" href="admin.html" data-admin hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6Z"/><path d="m9 12 2 2 4-4"/></svg>
+                <span>Admin</span>
+              </a>
+
+              <!-- shown only when signed out -->
+              <a class="acct__item" href="login.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M14 16.5 18.5 12 14 7.5"/><path d="M18.5 12H9"/></svg>
+                <span>Sign in</span>
+              </a>
+
+              <a class="acct__item" href="signup.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="8" r="3.4"/><path d="M3 20a7 7 0 0 1 12.2-4.7"/><path d="M18 14.2v5.6"/><path d="M15.2 17h5.6"/></svg>
+                <span>Create account</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========================== Secondary nav ========================== -->
+    <nav class="subnav" aria-label="Sections">
+      <div class="subnav__inner">
+        <a class="tab" href="index.html#rules">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 12.5-8 8a2.12 2.12 0 0 1-3-3l8-8"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg> Rules &amp; Updates
+        </a>
+
+        <a class="tab is-active" href="search.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Cards
+        </a>
+
+        <a class="tab" href="bundles.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Sms Numbers <span class="tab__new">(NEW)</span>
+        </a>
+
+        <a class="tab" href="messages.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg> Messages
+        </a>
+
+        <div class="menu" data-menu>
+          <button
+            class="tab"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="toolsMenu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Tools <svg class="tab__chev" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg>
+          </button>
+          <div class="menu__panel" id="toolsMenu" hidden>
+            <a class="menu__item" href="#">Colour tools</a>
+            <a class="menu__item" href="#">Image tools</a>
+            <a class="menu__item" href="#">Licence checker</a>
+          </div>
+        </div>
+
+        <div class="menu" data-menu>
+          <button
+            class="tab"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="ordersMenu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg> Orders <svg class="tab__chev" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg>
+          </button>
+          <div class="menu__panel" id="ordersMenu" hidden>
+            <a class="menu__item" href="#">All orders</a>
+            <a class="menu__item" href="#">Downloads</a>
+            <a class="menu__item" href="#">Invoices</a>
+          </div>
+        </div>
+
+        <a class="tab" href="tickets.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg> Tickets
+        </a>
+      </div>
+    </nav>
+
+    <!-- ============================= Search ============================ -->
+    <main class="page page--search">
+      <h1 class="search__title">Search</h1>
+
+      <form class="filters" id="filters" novalidate>
+        <div class="filters__grid">
+          <!-- ---------- left column ---------- -->
+          <div class="filters__col">
+            <div class="field-sm">
+              <label class="field-sm__label" for="fCreator">Base</label>
+              <select class="select select--block" id="fCreator"></select>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fZip">ZIP</label>
+              <select class="select select--block" id="fZip" disabled></select>
+              <p class="field-sm__hint" id="zipHint">Select country first</p>
+              <p class="zip-check" id="zipCheck" hidden>
+                <span id="zipCheckText"></span>
+                <button class="linkbtn linkbtn--inline" id="zipCheckBtn" type="button" hidden>
+                  Check with Geoapify
+                </button>
+              </p>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fBank">Bank</label>
+              <select class="select select--block" id="fBank" disabled>
+                <option value="">Select country first</option>
+              </select>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fId">Bin</label>
+              <input class="input-sm" id="fId" type="text" inputmode="numeric" autocomplete="off" placeholder="" />
+              
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fCountryInput">Country</label>
+              <div class="combo" id="countryCombo">
+                <input
+                  class="input-sm combo__input"
+                  id="fCountryInput"
+                  type="text"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-autocomplete="list"
+                  aria-controls="countryList"
+                  aria-describedby="countryHint"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="All"
+                />
+                <button class="combo__toggle" type="button" aria-label="Show all countries" tabindex="-1">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z" /></svg>
+                </button>
+                <input type="hidden" id="fCountry" value="" />
+
+                <ul class="combo__list" id="countryList" role="listbox" aria-label="Countries" hidden></ul>
+              </div>
+              <p class="field-sm__hint" id="countryHint">Type a code or name and press enter, or open the list.</p>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fState">State</label>
+              <select class="select select--block" id="fState" disabled>
+                <option value="">Select country first</option>
+              </select>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fCity">City</label>
+              <select class="select select--block" id="fCity" disabled>
+                <option value="">Select state first</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ---------- right column ---------- -->
+          <div class="filters__col">
+            <div class="field-sm">
+              <label class="field-sm__label" for="fTags">Tags</label>
+              <input class="input-sm" id="fTags" type="text" placeholder="Type a tag and press enter" />
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fLevel">Level</label>
+              <select class="select select--block" id="fLevel"></select>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fRefresh">Refresh</label>
+              <select class="select select--block" id="fRefresh"></select>
+            </div>
+
+            <div class="field-sm">
+              <label class="field-sm__label" for="fRefund">Refund</label>
+              <select class="select select--block" id="fRefund"></select>
+            </div>
+
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="fDiscounted" /><span class="check__box" aria-hidden="true"></span><span>ZIP</span></label>
+              <label class="check"><input type="checkbox" id="fRefundable" /><span class="check__box" aria-hidden="true"></span><span>Full Address</span></label>
+              <label class="check"><input type="checkbox" id="fRecent" /><span class="check__box" aria-hidden="true"></span><span>Phone</span></label>
+              <label class="check"><input type="checkbox" id="fRecent" /><span class="check__box" aria-hidden="true"></span><span>Email</span></label>
+            </div>
+
+            <div class="price-range">
+              <span class="field-sm__label" id="priceLabel">Price Range</span>
+              <div class="range">
+                <span class="range__track" aria-hidden="true"></span>
+                <span class="range__fill" id="rangeFill" aria-hidden="true"></span>
+                <input class="range__input" id="priceMin" type="range" min="0" max="500" step="5" value="0" aria-label="Minimum price" />
+                <input class="range__input" id="priceMax" type="range" min="0" max="500" step="5" value="500" aria-label="Maximum price" />
+              </div>
+
+              <div class="range__fields">
+                <input class="range__num" id="priceMinNum" type="number" min="0" max="500" value="0" aria-label="Minimum price value" />
+                <span class="range__to">to</span>
+                <input class="range__num" id="priceMaxNum" type="number" min="0" max="500" value="500" aria-label="Maximum price value" />
+              </div>
+              <p class="range__hint" id="rangeHint">$0 - $500</p>
+
+              <div class="checks checks--tight">
+                <label class="check"><input type="checkbox" id="fBeginner" /><span class="check__box" aria-hidden="true"></span><span>DOB</span></label>
+                <label class="check"><input type="checkbox" id="fAutolayout" /><span class="check__box" aria-hidden="true"></span><span>SSN</span></label>
+                <label class="check"><input type="checkbox" id="fTokens" /><span class="check__box" aria-hidden="true"></span><span>IP ADDRESS</span></label>
+                <label class="check"><input type="checkbox" id="fDark" /><span class="check__box" aria-hidden="true"></span><span>USER AGENT</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <button class="btn btn--primary filters__submit" type="submit">Search</button>
+      </form>
+
+      <!-- ---------------------------- results ---------------------------- -->
+      <section class="results">
+        <div class="results__bar">
+          <label class="results__show" for="pageSize">
+            Show
+            <select class="select" id="pageSize">
+              <option>10</option>
+              <option selected>25</option>
+              <option>50</option>
+              <option value="all">All</option>
+            </select>
+            Entries
+          </label>
+        </div>
+
+        <div class="results__scroll">
+          <table class="rtable" id="rtable">
+            <thead>
+              <tr>
+                <th>Base</th>
+                <th>Seller</th>
+                <th>Base Quality</th>
+                <th>Bin</th>
+                <th>Level</th>
+                <th>ExpDate</th>
+                <th>Credit/Debit</th>
+                <th>Address Details</th>
+                <th>Email/Phone/DOB/SSN</th>
+                <th>Special Info</th>
+                <th>Bank Name</th>
+                <th class="refund-head">Refundable</th>
+                <th class="r-pricehead">Price</th>
+                <th class="r-buyhead">Action</th>
+              </tr>
+            </thead>
+            <tbody id="rtableBody"></tbody>
+          </table>
+        </div>
+
+        <nav class="pager" id="pager" aria-label="Result pages" hidden></nav>
+
+        <p class="results__empty" id="resultsEmpty" hidden></p>
+        <p class="buy-note" id="buyNote" role="status" hidden></p>
+      </section>
+    </main>
+
+    <script src="assets/js/menu.js" defer></script>
+    <script src="assets/data/zips-data.js" defer></script>
+    <script src="assets/data/states-data.js" defer></script>
+    <script src="assets/data/cities-data.js" defer></script>
+    <script src="assets/data/banks-data.js" defer></script>
+    <script src="assets/data/flags-data.js" defer></script>
+    <script src="assets/data/drops-data.js" defer></script>
+    <script src="assets/js/search.js" defer></script>
+    <script src="assets/js/cart.js" defer></script>
+    <script src="assets/js/session.js" defer></script>
+  </body>
+</html>

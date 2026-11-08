@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bundles — Northlight</title>
+    <meta
+      name="description"
+      content="Every bundle the shop sells, one price each."
+    />
+    <link rel="stylesheet" href="assets/css/bundles.css" />
+  </head>
+
+  <body data-requires-auth>
+    <!-- ============================ Top bar ============================ -->
+    <header class="topbar">
+      <div class="topbar__inner">
+        <!-- ===== LOGO (left) ==================================================
+             Replace the dashed placeholder below with your own image:
+
+                 <img src="logo.png" alt="Your store" class="topbar__logo-img" />
+
+             PNG or SVG, any shape. It is centred vertically and scaled to fit
+             the header height (--header-height in styles.css).
+             ================================================================== -->
+
+        </a>
+        <img src="logo.png" alt="Your store" class="topbar__logo-img" />
+
+        <!-- ===== CENTRE: balance + wallet ================================== -->
+        <div class="topbar__center">
+          <a class="wallet" href="deposit.html" aria-label="Wallet balance">
+            <span class="wallet__cur">$</span>
+            <span class="js-balance">0.00</span>
+          </a>
+          <a class="btn btn--wallet" href="deposit.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+            </svg>
+            <span class="btn__label">Wallet</span>
+          </a>
+        </div>
+
+        <!-- ===== RIGHT: messages, cart, profile ============================ -->
+        <div class="topbar__actions">
+          <a class="icon-btn" href="messages.html" aria-label="Messages">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v2.2l8 5 8-5V6H4Zm16 5.9-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 11.9V18h16v-6.1Z"/>
+            </svg>
+          </a>
+
+          <a class="icon-btn" href="cart.html" aria-label="Shopping cart" id="cartBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M7 4a3 3 0 0 1 10 0h2.5a1 1 0 0 1 1 .9l1 12A2 2 0 0 1 19.5 19h-15a2 2 0 0 1-2-2.1l1-12a1 1 0 0 1 1-.9H7Zm2 0h6a1 1 0 0 0-2-2h-2a1 1 0 0 0-2 2Z"/>
+            </svg>
+            <span class="badge" id="cartCount" hidden>0</span>
+          </a>
+
+          <div class="menu" data-menu>
+            <button class="avatar" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu">SU</button>
+            <div
+              class="menu__panel menu__panel--account menu__panel--right"
+              id="accountMenu"
+              hidden
+            >
+              <!-- who is signed in: name, then the address on file -->
+              <div class="acct__head" data-user>
+                <p class="acct__name" id="menuUsername">search.user</p>
+                <p class="acct__email" id="menuEmail">search.user@example.com</p>
+              </div>
+
+              <a class="acct__item" href="settings.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+                <span>My Account</span>
+              </a>
+
+              <a class="acct__item" href="activity.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.6v5"/><path d="M12 16.2h.01"/></svg>
+                <span>Your Activities</span>
+              </a>
+
+              <a class="acct__item" href="#" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0"/><path d="M16.5 5.4a3.2 3.2 0 0 1 0 5.9"/><path d="M18 13.6a6.2 6.2 0 0 1 3.2 5.9"/></svg>
+                <span>Referral Program</span>
+              </a>
+
+              <a class="acct__item" href="support.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.4a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.1-2.5 3.9"/><path d="M12 17.2h.01"/></svg>
+                <span>Support</span>
+              </a>
+
+              <button class="acct__item" type="button" id="signOutBtn" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16.5 5.5 12 10 7.5"/><path d="M5.5 12H15"/></svg>
+                <span>Sign out</span>
+              </button>
+
+              <a class="acct__item acct__item--admin" href="admin.html" data-admin hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6Z"/><path d="m9 12 2 2 4-4"/></svg>
+                <span>Admin</span>
+              </a>
+
+              <!-- shown only when signed out -->
+              <a class="acct__item" href="login.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M14 16.5 18.5 12 14 7.5"/><path d="M18.5 12H9"/></svg>
+                <span>Sign in</span>
+              </a>
+
+              <a class="acct__item" href="signup.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="8" r="3.4"/><path d="M3 20a7 7 0 0 1 12.2-4.7"/><path d="M18 14.2v5.6"/><path d="M15.2 17h5.6"/></svg>
+                <span>Create account</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========================== Secondary nav ========================== -->
+    <nav class="subnav" aria-label="Sections">
+      <div class="subnav__inner">
+        <a class="tab" href="index.html#rules">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 12.5-8 8a2.12 2.12 0 0 1-3-3l8-8"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg> Rules &amp; Updates
+        </a>
+
+        <a class="tab" href="search.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Cards
+        </a>
+
+        <a class="tab is-active" href="bundles.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Sms Numbers <span class="tab__new">(NEW)</span>
+        </a>
+
+        <a class="tab" href="messages.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg> Messages
+        </a>
+
+        <div class="menu" data-menu>
+          <button
+            class="tab"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="toolsMenu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Tools <svg class="tab__chev" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg>
+          </button>
+          <div class="menu__panel" id="toolsMenu" hidden>
+            <a class="menu__item" href="#">Colour tools</a>
+            <a class="menu__item" href="#">Image tools</a>
+            <a class="menu__item" href="#">Licence checker</a>
+          </div>
+        </div>
+
+        <div class="menu" data-menu>
+          <button
+            class="tab"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="ordersMenu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg> Orders <svg class="tab__chev" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg>
+          </button>
+          <div class="menu__panel" id="ordersMenu" hidden>
+            <a class="menu__item" href="orders.html">All orders</a>
+            <a class="menu__item" href="#">Downloads</a>
+            <a class="menu__item" href="#">Invoices</a>
+          </div>
+        </div>
+
+        <a class="tab" href="tickets.html">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg> Tickets
+        </a>
+      </div>
+    </nav>
+
+    <!-- ============================= Tickets ============================= -->
+    <main class="page page--bundles">
+      <section class="bundles" aria-labelledby="bundlesTitle">
+        <h1 class="sr-only" id="bundlesTitle">Bundles</h1>
+
+        <div class="bundles__bar">
+          <label class="bundles__show" for="bundleSize">
+            Show
+            <select class="bundles__select" id="bundleSize">
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            Entries
+          </label>
+
+          <div class="bundles__search">
+            <button class="bundles__searchbtn" type="button" id="bundleSearchBtn" aria-label="Search bundles">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+            </button>
+            <input
+              class="bundles__input"
+              id="bundleSearch"
+              type="search"
+              autocomplete="off"
+              aria-label="Search service name"
+            />
+          </div>
+        </div>
+
+        <div class="bundles__scroll">
+          <table class="btable">
+            <thead>
+              <tr>
+                <th scope="col">Service Name</th>
+                <th scope="col">Price</th>
+                <th scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody id="bundleRows"></tbody>
+          </table>
+        </div>
+
+        <p class="bundles__empty" id="bundleEmpty" hidden>No bundle matches that search.</p>
+        <p class="bundles__note" id="bundleNote" role="status" hidden></p>
+
+        <nav class="bpager" id="bundlePager" aria-label="Bundle pages"></nav>
+      </section>
+    </main>
+
+
+    <script src="assets/js/menu.js" defer></script>
+    <script src="assets/js/cart.js" defer></script>
+    <script src="assets/data/bundles-data.js" defer></script>
+    <script src="assets/js/menu.js" defer></script>
+    <script src="assets/js/cart.js" defer></script>
+    <script src="assets/js/bundles.js" defer></script>
+    <script src="assets/js/session.js" defer></script>
+    <script src="assets/js/session.js" defer></script>
+  </body>
+</html>

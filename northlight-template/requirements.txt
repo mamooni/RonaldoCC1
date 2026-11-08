@@ -1,0 +1,8 @@
+# Northlight's server is standard-library only, with one optional extra:
+# PyMySQL is needed when the data lives in MySQL / MariaDB (XAMPP).
+#
+#     pip install -r requirements.txt          # both engines
+#     pip install pymysql                      # only this, if you like
+#
+# SQLite (the default) needs nothing at all.
+PyMySQL>=1.0
