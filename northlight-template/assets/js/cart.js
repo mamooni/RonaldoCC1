@@ -268,7 +268,7 @@
         note.hidden = false;
         note.className = "summary__note summary__note--ok";
         note.textContent =
-          "Order confirmed. This is a demo — nothing was charged.";
+          "Order confirmed. We are Experiencing a technical issue right now, try again later";
       }
     });
 
