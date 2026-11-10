@@ -1029,7 +1029,18 @@ def goods_catalogue():
 
     # Drops first, then bundles: the drop ids stay exactly as they were, and the
     # bundles simply continue the same sequence (so no id can ever collide).
-    rows = catalogue_rows() + bundle_rows(BUNDLES_JS)
+    
+    drop_rows = catalogue_rows()
+    bundle_items = bundle_rows(BUNDLES_JS)
+
+    print("CATALOGUE DEBUG:", flush=True)
+    print("WEB_ROOT:", WEB_ROOT, flush=True)
+    print("DROPS FILE:", DROPS_JS, "EXISTS:", DROPS_JS.is_file(), flush=True)
+    print("DROP ROWS:", len(drop_rows), flush=True)
+    print("BUNDLE ROWS:", len(bundle_items), flush=True)
+
+    rows = drop_rows + bundle_items
+
     if not rows:
         return {}
 
