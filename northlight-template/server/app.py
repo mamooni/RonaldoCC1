@@ -1639,29 +1639,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._not_allowed
         raise AttributeError(name)
 
-    def _get(self):
-        path = self.path.split("?")[0]
-        if page_throttle.hit(self.client_address[0]):
-            return self._error(429, "Too many requests. Slow down.")
+def _get(self):
+    path = self.path.split("?")[0]
+    if page_throttle.hit(self.client_address[0]):
+        return self._error(429, "Too many requests. Slow down.")
 
-        if path == "/api/me":
-            return self.api_me()
-        if path == "/api/orders":
-            return self.api_orders()
-        if path == "/api/payments":
-            return self.api_my_payments()
-        if path == "/api/admin/data":
-            return self.api_admin_data()
-        if path == "/api/bundles":
-            return self.api_bundles()
-        if path.startswith("/api/postcode"):
-            return self.api_postcode()
-        if path.startswith("/api/"):
-            return self._error(404, "Unknown endpoint.")
-        if path == "/api":
-            return self._error(404, "Unknown endpoint.")
+    if path == "/api/me":
+        return self.api_me()
+    if path == "/api/public-config":
+        return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
+    if path == "/api/orders":
+        return self.api_orders()
+    if path == "/api/payments":
+        return self.api_my_payments()
+    if path == "/api/admin/data":
+        return self.api_admin_data()
+    if path == "/api/bundles":
+        return self.api_bundles()
+    if path.startswith("/api/postcode"):
+        return self.api_postcode()
+    if path.startswith("/api/"):
+        return self._error(404, "Unknown endpoint.")
+    if path == "/api":
+        return self._error(404, "Unknown endpoint.")
 
-        return self.serve_static(path)
+    return self.serve_static(path)
 
     def _post(self, path=None):
         path = (path or self.path).split("?")[0]
@@ -1704,79 +1706,73 @@ class Handler(BaseHTTPRequestHandler):
             return user_for_token(conn, token)
 
     def api_signup(self, payload):
-        # Verify Cloudflare Turnstile CAPTCHA first
-        captcha_token = str(payload.get("captchaToken") or payload.get("cf-turnstile-response") or "").strip()
-        if not verify_turnstile(captcha_token, self.client_address[0]):
-            return self._json(
-                400,
-                {
-                    "error": "Security check failed. Please try again.",
-                    "fields": {"captcha": "Please complete the security check."},
-                },
-            )
+    values, errors = validate_signup(payload)
 
-        values, errors = validate_signup(payload)
-        if errors:
-            return self._json(
-                400, {"error": "Please fix the highlighted fields.", "fields": errors}
-            )
+    if not verify_turnstile(
+        str(payload.get("turnstile_token", "")),
+        self.client_address[0]
+    ):
+        errors["captcha"] = "Human verification failed. Please try again."
 
-        # scrypt is deliberately slow: hash before opening the write transaction
-        # so nobody else waits on it, and so a lock is never held for ~100 ms.
-        password_hash = hash_password(values["password"])
-        now = int(time.time())
+    if errors:
+        return self._json(
+            400, {"error": "Please fix the highlighted fields.", "fields": errors}
+        )
 
-        try:
-            with db(write=True) as conn:
-                existing = conn.execute(
-                    "SELECT username, email FROM users WHERE username = ? OR email = ?",
-                    (values["username"], values["email"]),
-                ).fetchone()
+    password_hash = hash_password(values["password"])
+    now = int(time.time())
 
-                if existing:
-                    if existing["username"].lower() == values["username"].lower():
-                        errors["username"] = "That username is taken."
-                    if existing["email"].lower() == values["email"].lower():
-                        errors["email"] = "That email is already registered."
-                    return self._json(
-                        409,
-                        {"error": "That account already exists.", "fields": errors},
-                    )
+    try:
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT username, email FROM users WHERE username = ? OR email = ?",
+                (values["username"], values["email"]),
+            ).fetchone()
 
-                cursor = conn.execute(
-                    "INSERT INTO users (username, email, password_hash, created_at, balance_cents) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (values["username"], values["email"], password_hash, now, NEW_USER_CENTS),
+            if existing:
+                if existing["username"].lower() == values["username"].lower():
+                    errors["username"] = "That username is taken."
+                if existing["email"].lower() == values["email"].lower():
+                    errors["email"] = "That email is already registered."
+                return self._json(
+                    409,
+                    {"error": "That account already exists.", "fields": errors},
                 )
-                user_id = cursor.lastrowid
-                token = new_session(conn, user_id)
-                audit(
-                    conn,
-                    "account.signup",
-                    actor={"id": user_id, "username": values["username"]},
-                    target=values["username"],
-                    detail=values["email"],
-                    ip=self.client_address[0],
-                )
-        except sqlite3.IntegrityError:
-            # two sign-ups for the same name arrived together
-            return self._json(
-                409,
-                {
-                    "error": "That account already exists.",
-                    "fields": {"username": "That username is taken."},
-                },
-            )
 
-        user = {
-            "id": user_id,
-            "username": values["username"],
-            "email": values["email"],
-            "created_at": now,
-            "role": "user",
-            "balance": dollars(NEW_USER_CENTS),
-        }
-        return self._json(201, {"user": user}, [self._session_cookie(token)])
+            cursor = conn.execute(
+                "INSERT INTO users (username, email, password_hash, created_at, balance_cents) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (values["username"], values["email"], password_hash, now, NEW_USER_CENTS),
+            )
+            user_id = cursor.lastrowid
+            token = new_session(conn, user_id)
+            audit(
+                conn,
+                "account.signup",
+                actor={"id": user_id, "username": values["username"]},
+                target=values["username"],
+                detail=values["email"],
+                ip=self.client_address[0],
+            )
+    except sqlite3.IntegrityError:
+        return self._json(
+            409,
+            {
+                "error": "That account already exists.",
+                "fields": {"username": "That username is taken."},
+            },
+        )
+
+    user = {
+        "id": user_id,
+        "username": values["username"],
+        "email": values["email"],
+        "created_at": now,
+        "role": "user",
+        "balance": dollars(NEW_USER_CENTS),
+    }
+    return self._json(201, {"user": user}, [self._session_cookie(token)])
+
 
     def api_login(self, payload):
         username = str(payload.get("username", "")).strip()
