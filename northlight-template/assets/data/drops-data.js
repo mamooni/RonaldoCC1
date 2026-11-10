@@ -1403,21 +1403,75 @@ window.NL_DROPS = [
   "blurb": "220 coastal and travel icons on a 24px grid, stroke and outline versions."
  }
 ];
-// 1. Define your base drop name
-const dropBaseName = "Premium Bundle"; 
 
-// 2. Get today's date formatted as YYYY-MM-DD
-const today = new Date().toISOString().split('T');
+(function () {
+    const adjectives = [
+        "Amber", "Velvet", "Nova", "Silver", "Urban",
+        "Golden", "Crystal", "Pixel", "Midnight", "Lunar",
+        "Modern", "Hidden", "Arctic", "Royal", "Neon",
+        "Sage", "Solar", "Wild", "Cosmic", "Elegant"
+    ];
 
-// Helper function to generate a random mixed username (letters + numbers)
-function generateRandomUsername(length = 8) {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let username = '';
-    for (let i = 0; i < length; i++) {
-        username += chars.charAt(Math.floor(Math.random() * chars.length));
+    const nouns = [
+        "Studio", "Atlas", "Canvas", "Orbit", "Horizon",
+        "Archive", "Motion", "Craft", "Vision", "Palette",
+        "Signal", "Market", "Foundry", "Frame", "Collective",
+        "Echo", "District", "Elements", "Vault", "Concept"
+    ];
+
+    const types = [
+        "Collection", "Kit", "Pack", "Library", "Edition",
+        "Essentials", "System", "Works", "Set", "Series"
+    ];
+
+    // Stable hash: the same product gets the same values on refresh.
+    function hash(text) {
+        let value = 2166136261;
+
+        for (let i = 0; i < text.length; i++) {
+            value ^= text.charCodeAt(i);
+            value = Math.imul(value, 16777619);
+        }
+
+        return value >>> 0;
     }
-    return username;
-}
+
+    function makeTime(seed) {
+        const minutes = seed % 1440;
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+
+        return String(hours).padStart(2, "0") + ":" +
+               String(mins).padStart(2, "0");
+    }
+
+    window.NL_DROPS.forEach(function (item, index) {
+        const originalKey =
+            String(item.title) + "|" +
+            String(item.creator) + "|" + index;
+
+        const seed = hash(originalKey);
+
+        const adjective = adjectives[seed % adjectives.length];
+        const noun = nouns[Math.floor(seed / 7) % nouns.length];
+        const type = types[Math.floor(seed / 31) % types.length];
+
+        // Give each product a generated name.
+        item.title = adjective + " " + noun + " " + type;
+
+        // First seven products are always dated today.
+        // Remaining products are randomly distributed into future dates.
+        if (index < 7) {
+            item.daysAgo = 0;
+        } else {
+            item.daysAgo = -(1 + (hash(originalKey + "|date") % 14));
+        }
+
+        // Generate a stable individual time for each product.
+        item.time = makeTime(hash(originalKey + "|time"));
+    });
+})();
+
 
 // 3. Loop through and update everything
 window.NL_DROPS.forEach(item => {

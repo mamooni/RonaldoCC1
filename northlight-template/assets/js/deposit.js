@@ -648,9 +648,9 @@
     }
 
     announce(
-      "Payment sent. Deposit #" +
+      "Payment details submitted. Deposit #" +
         (id === undefined ? "" : id) +
-        " is waiting for an admin to confirm it."
+        " is awaiting verification."
     );
   }
 

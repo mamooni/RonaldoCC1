@@ -1833,7 +1833,7 @@
 
     // "View goods" opens this listing's detail dialog; adding to the cart
     // happens there, where the price and licence are confirmed.
-    var viewBtn = el("button", "btn btn--primary", "View goods");
+    var viewBtn = el("button", "btn btn--primary", "View Cards");
     viewBtn.type = "button";
     viewBtn.addEventListener("click", function () {
       openDialog(item);

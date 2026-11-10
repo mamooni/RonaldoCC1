@@ -1763,19 +1763,28 @@
           return;
         }
 
+       
         if (result.status === 402) {
+          var amount = result.data.price != null
+            ? result.data.price
+            : price;
+
+          var remaining = result.data.missing != null
+            ? result.data.missing
+            : Math.max(0, amount - (result.data.balance || 0));
+
           buyNote(
-            "Insufficient funds. " +
-              title +
-              " costs " +
-              buyMoney(result.data.price || price) +
-              " and your wallet holds " +
-              buyMoney(result.data.balance),
+            "Insufficient funds. Amount required: " +
+              buyMoney(amount) +
+              ". Amount remaining: " +
+              buyMoney(remaining) +
+              ".",
             "bad"
           );
           restore();
           return;
         }
+
 
         if (result.status === 401) {
           buyNote("Sign in again to buy anything — your session has ended.", "bad");
@@ -1788,7 +1797,7 @@
       })
       .catch(function () {
         buyNote(
-          "Can't reach the server. Start it with python3 server/app.py and try again.",
+          "Unable to complete your purchase. Please check your internet connection and try again.",
           "bad"
         );
         restore();
