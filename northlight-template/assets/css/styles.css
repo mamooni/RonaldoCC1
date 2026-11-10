@@ -5136,3 +5136,132 @@ button.menu__item {
   font-size: 12.5px;
   color: var(--text-mute);
 }
+
+
+/* ---- On-screen buy toast (insufficient funds, etc.) --------------------- */
+
+.nl-toast-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(15, 18, 28, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: nl-toast-fade 0.18s ease;
+}
+
+.nl-toast {
+  position: relative;
+  z-index: 9999;
+  width: min(400px, 100%);
+  padding: 22px 22px 18px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(15, 18, 28, 0.28);
+  text-align: center;
+  animation: nl-toast-pop 0.22s ease;
+}
+
+.nl-toast--bad {
+  border-top: 4px solid #c41e3a;
+}
+
+.nl-toast--ok {
+  border-top: 4px solid #17734a;
+}
+
+.nl-toast--info {
+  border-top: 4px solid #3d5a80;
+}
+
+.nl-toast__icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nl-toast--bad .nl-toast__icon {
+  background: #fdecef;
+  color: #c41e3a;
+}
+
+.nl-toast--ok .nl-toast__icon {
+  background: #e8f7ee;
+  color: #17734a;
+}
+
+.nl-toast--info .nl-toast__icon {
+  background: #eef2f9;
+  color: #3d5a80;
+}
+
+.nl-toast__title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1d27;
+}
+
+.nl-toast__body {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #4a5160;
+}
+
+.nl-toast__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.nl-toast__btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 9px;
+  border: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nl-toast__btn--primary {
+  background: #d81f30;
+  color: #fff;
+}
+
+.nl-toast__btn--primary:hover {
+  background: #c01a2a;
+}
+
+.nl-toast__btn--ghost {
+  background: #eef1f6;
+  color: #2b3140;
+}
+
+.nl-toast__btn--ghost:hover {
+  background: #e2e6ee;
+}
+
+@keyframes nl-toast-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes nl-toast-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}

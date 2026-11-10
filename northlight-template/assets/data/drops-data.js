@@ -11,7 +11,7 @@
 
 window.NL_DROPS = [
  {
-  "title": "",
+  "title": "cronicle",
   "creator": "studio-north",
   "category": "Interface kit",
   "formats": "Figma, Sketch, SVG",

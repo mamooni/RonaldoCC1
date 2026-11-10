@@ -34,7 +34,7 @@ Sessions are opaque random tokens stored (hashed) in SQLite and sent to the
 browser in an HttpOnly, SameSite=Lax cookie. Passwords are hashed with
 scrypt and a per-user salt — never stored in the clear.
 
-Operational notes:
+What is deliberately simple, because this is a learning/demo project:
 
   * single-process, threaded server; SQLite in WAL mode
   * in-memory rate limiting (resets when the process restarts)
@@ -52,7 +52,6 @@ import mimetypes
 import os
 import re
 import secrets
-import smtplib
 import sqlite3
 import time
 import urllib.request
@@ -64,7 +63,6 @@ from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote
-from email.message import EmailMessage
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -102,21 +100,6 @@ MYSQL = {
 
 SESSION_COOKIE = "nl_session"
 SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
-RESET_TTL = 60 * 60  # reset links expire after one hour
-
-# Optional production integrations. Keep secrets in the environment, never in
-# HTML or source control. NL_TURNSTILE_SITE_KEY is safe to expose to browsers;
-# NL_TURNSTILE_SECRET and SMTP credentials are not.
-TURNSTILE_SITE_KEY = os.environ.get("NL_TURNSTILE_SITE_KEY", "").strip()
-TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
-SMTP_HOST = os.environ.get("NL_SMTP_HOST", "").strip()
-SMTP_PORT = int(os.environ.get("NL_SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("NL_SMTP_USER", "").strip()
-SMTP_PASSWORD = os.environ.get("NL_SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("NL_SMTP_FROM", "").strip()
-RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "")
-RESEND_FROM = os.environ.get("NL_RESEND_FROM", "").strip()
-PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
 
 MAX_BODY = 8 * 1024       # 8 KB is plenty for these forms
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
@@ -127,6 +110,15 @@ HTTPS_ONLY = os.environ.get("NL_HTTPS", "") not in ("", "0", "false", "no")
 # Frame protection is off by default because the preview panel embeds these
 # pages in an iframe; turn it on for a real deployment.
 STRICT_HEADERS = os.environ.get("NL_STRICT_HEADERS", "") not in ("", "0", "false", "no")
+
+# Cloudflare Turnstile (CAPTCHA). Set NL_TURNSTILE_SECRET in production.
+TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
+
+# Resend (email). Used for password-reset links.
+RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "").strip()
+RESEND_FROM = os.environ.get("NL_RESEND_FROM", "Northlight <onboarding@resend.dev>").strip()
+# Public base URL of the site (used in reset links). Example: https://northlight.onrender.com
+PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
 
 # Refuse to boot with the built-in admin password unless explicitly allowed.
 ALLOW_DEFAULT_ADMIN = os.environ.get("NL_ALLOW_DEFAULT_ADMIN", "") not in (
@@ -266,14 +258,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
-
-CREATE TABLE IF NOT EXISTS password_reset_tokens (
-    token_hash TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL,
-    used_at    INTEGER
-);
-CREATE INDEX IF NOT EXISTS reset_tokens_user ON password_reset_tokens(user_id);
 
 -- postcode lookups are cached so a repeated check costs no API credit
 CREATE TABLE IF NOT EXISTS postcodes (
@@ -526,6 +510,17 @@ CREATE INDEX IF NOT EXISTS audit_at ON audit(at);
 CREATE INDEX IF NOT EXISTS audit_action ON audit(action, at);
 """
 
+PASSWORD_RESETS_TABLE = """
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    used_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id);
+"""
+
 
 def _table_columns(conn, table: str):
     if DB_KIND == "mysql":
@@ -630,6 +625,7 @@ def _migrate(conn):
     conn.executescript(PAYMENTS_TABLE)
     conn.executescript(PURCHASES_TABLE)
     conn.executescript(AUDIT_TABLE)
+    conn.executescript(PASSWORD_RESETS_TABLE)
 
 
 def _rebuild(conn, table: str, create_sql: str, copy_sql: str):
@@ -692,12 +688,11 @@ def prune_sessions(conn):
     """Drop sessions that have expired; called on boot and after each login."""
     now = int(time.time())
     removed = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,)).rowcount
-    conn.execute("DELETE FROM password_reset_tokens WHERE expires_at < ? OR used_at IS NOT NULL", (now,))
     conn.execute("DELETE FROM audit WHERE at < ?", (now - 180 * 24 * 3600,))
     return removed
 
 
-MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes", "password_reset_tokens")
+MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes")
 
 
 def init_mysql():
@@ -1005,17 +1000,23 @@ _goods_cache = {"mtime": None, "items": {}}
 
 
 def goods_catalogue():
-    """{id: {id, title, creator, price_cents}} read from search.js.
+    """{id: {id, title, creator, price_cents}} read from the drops + bundles files.
 
-    Cached until the file changes, so editing the catalogue is enough to change
+    Cached until those files change, so editing the catalogue is enough to change
     what the shop sells — no restart, no duplicated price list.
     """
-    global GOODS_JS, BUNDLES_JS
-    GOODS_JS = _goods_source()  # the file may have been moved since boot
+    global GOODS_JS, DROPS_JS, BUNDLES_JS
+    GOODS_JS = _goods_source()  # fallback only
+    DROPS_JS = _drops_source()
     BUNDLES_JS = _bundles_source()
 
     try:
-        mtime = (GOODS_JS.stat().st_mtime, BUNDLES_JS.stat().st_mtime)
+        # Watch the files that actually hold prices (drops + bundles).
+        mtime = (
+            DROPS_JS.stat().st_mtime if DROPS_JS.is_file() else 0,
+            BUNDLES_JS.stat().st_mtime if BUNDLES_JS.is_file() else 0,
+            GOODS_JS.stat().st_mtime if GOODS_JS.is_file() else 0,
+        )
     except OSError:
         return {}
 
@@ -1121,6 +1122,81 @@ def audit(conn, action, actor=None, target=None, detail=None, ip=None):
 # --------------------------------------------------------------------------
 
 
+def verify_turnstile(token: str, remote_ip: str = "") -> bool:
+    """Verify a Cloudflare Turnstile token. Returns True if valid."""
+    if not TURNSTILE_SECRET:
+        # No secret configured — skip verification (local development only)
+        return True
+    if not token:
+        return False
+    data = urllib.parse.urlencode({
+        "secret": TURNSTILE_SECRET,
+        "response": token,
+        "remoteip": remote_ip or "",
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return bool(body.get("success"))
+    except Exception as exc:
+        print("Turnstile verification failed:", exc)
+        return False
+
+
+
+def send_email(to_email: str, subject: str, html_body: str) -> bool:
+    """Send an email via Resend. Returns True on success."""
+    if not RESEND_API_KEY:
+        print("RESEND_API_KEY not set — cannot send email")
+        return False
+    payload = {
+        "from": RESEND_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return 200 <= resp.status < 300
+    except Exception as exc:
+        print("Resend send failed:", exc)
+        return False
+
+
+def create_password_reset(conn, user_id: int) -> str:
+    """Create a reset token, store its hash, return the raw token."""
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    expires = now + 60 * 60  # 1 hour
+    # invalidate any previous unused tokens for this user
+    conn.execute(
+        "UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+        (now, user_id),
+    )
+    conn.execute(
+        "INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+        (token_hash, user_id, expires, now),
+    )
+    return raw
+
+
 def validate_signup(payload):
     """Returns (clean_values, field_errors)."""
     errors = {}
@@ -1151,82 +1227,6 @@ def validate_signup(payload):
         errors["password"] = "Add at least one symbol."
 
     return {"username": username, "email": email, "password": password}, errors
-
-
-def valid_new_password(password: str):
-    """Return a client-safe validation message, or an empty string."""
-    if len(password) < MIN_PASSWORD:
-        return f"Use at least {MIN_PASSWORD} characters."
-    if not re.search(r"[A-Za-z]", password):
-        return "Add at least one letter."
-    if not re.search(r"\d", password):
-        return "Add at least one number."
-    if not re.search(r"[^A-Za-z0-9]", password):
-        return "Add at least one symbol."
-    if len(password) > 1024:
-        return "That password is too long."
-    return ""
-
-
-def verify_turnstile(token: str, remote_ip: str) -> bool:
-    """Verify a Turnstile token at the provider; fail closed when configured."""
-    if not TURNSTILE_SECRET:
-        return True
-    if not token or len(token) > 4096:
-        return False
-    body = urllib.parse.urlencode({
-        "secret": TURNSTILE_SECRET, "response": token, "remoteip": remote_ip
-    }).encode("utf-8")
-    try:
-        request = urllib.request.Request(
-            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST"
-        )
-        with urllib.request.urlopen(request, timeout=8) as response:
-            return bool(json.loads(response.read().decode("utf-8")).get("success"))
-    except (urllib.error.URLError, ValueError, TimeoutError):
-        return False
-
-
-def send_reset_email(address: str, link: str) -> bool:
-    """Deliver a reset link through Resend or configured SMTP."""
-    subject = "Reset your Northlight password"
-    text = (
-        "Someone requested a password reset for your Northlight account.\n\n"
-        f"Use this link within one hour: {link}\n\n"
-        "If this was not you, you can safely ignore this email."
-    )
-    if RESEND_API_KEY and RESEND_FROM:
-        try:
-            body = json.dumps({"from": RESEND_FROM, "to": [address], "subject": subject, "text": text}).encode("utf-8")
-            request = urllib.request.Request(
-                "https://api.resend.com/emails", data=body,
-                headers={"Authorization": "Bearer " + RESEND_API_KEY, "Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return 200 <= response.status < 300
-        except (urllib.error.URLError, TimeoutError, ValueError) as error:
-            print("  password reset email via Resend failed:", error)
-            return False
-    if not (SMTP_HOST and SMTP_FROM):
-        print("  password reset email not sent: configure NL_RESEND_API_KEY and NL_RESEND_FROM")
-        return False
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = SMTP_FROM
-    message["To"] = address
-    message.set_content(text)
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
-            smtp.starttls()
-            if SMTP_USER:
-                smtp.login(SMTP_USER, SMTP_PASSWORD)
-            smtp.send_message(message)
-        return True
-    except (OSError, smtplib.SMTPException) as error:
-        print("  password reset email failed:", error)
-        return False
 
 
 # --------------------------------------------------------------------------
@@ -1361,8 +1361,10 @@ CONTENT_TYPES = {
 
 BASE_CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; "
-    "connect-src 'self' https://challenges.cloudflare.com; font-src 'self' data:; "
+    "script-src 'self' https://challenges.cloudflare.com; "
+    "frame-src https://challenges.cloudflare.com; "
+    "connect-src 'self' https://challenges.cloudflare.com; "
+    "font-src 'self' data:; "
     "object-src 'none'; base-uri 'none'; form-action 'self'"
 )
 # the standalone preview files carry a small inline script of their own
@@ -1371,11 +1373,11 @@ PREVIEW_CSP = BASE_CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-i
 POST_ROUTES = {
     "/api/signup": "api_signup",
     "/api/login": "api_login",
-    "/api/password-reset/request": "api_password_reset_request",
-    "/api/password-reset/confirm": "api_password_reset_confirm",
     "/api/logout": "api_logout",
     "/api/account/email": "api_account_email",
     "/api/account/password": "api_account_password",
+    "/api/forgot-password": "api_forgot_password",
+    "/api/reset-password": "api_reset_password",
     "/api/payments": "api_create_payment",
     "/api/purchase": "api_purchase",
     "/api/admin/payment": "api_admin_payment",
@@ -1641,8 +1643,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/me":
             return self.api_me()
-        if path == "/api/public-config":
-            return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
         if path == "/api/orders":
             return self.api_orders()
         if path == "/api/payments":
@@ -1701,9 +1701,18 @@ class Handler(BaseHTTPRequestHandler):
             return user_for_token(conn, token)
 
     def api_signup(self, payload):
+        # Verify Cloudflare Turnstile CAPTCHA first
+        captcha_token = str(payload.get("captchaToken") or payload.get("cf-turnstile-response") or "").strip()
+        if not verify_turnstile(captcha_token, self.client_address[0]):
+            return self._json(
+                400,
+                {
+                    "error": "Security check failed. Please try again.",
+                    "fields": {"captcha": "Please complete the security check."},
+                },
+            )
+
         values, errors = validate_signup(payload)
-        if not verify_turnstile(str(payload.get("turnstile_token", "")), self.client_address[0]):
-            errors["captcha"] = "Human verification failed. Please try again."
         if errors:
             return self._json(
                 400, {"error": "Please fix the highlighted fields.", "fields": errors}
@@ -1765,53 +1774,6 @@ class Handler(BaseHTTPRequestHandler):
             "balance": dollars(NEW_USER_CENTS),
         }
         return self._json(201, {"user": user}, [self._session_cookie(token)])
-
-    def api_password_reset_request(self, payload):
-        """Issue a one-use, short-lived reset token without leaking account existence."""
-        email = str(payload.get("email", "")).strip().lower()
-        # Always return this response: attackers cannot use this form to list users.
-        response = {"ok": True, "message": "If that email belongs to an account, a reset link has been sent."}
-        if len(email) > 254 or not EMAIL_RE.match(email):
-            return self._json(200, response)
-        with db() as conn:
-            user = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
-        if user is None:
-            return self._json(200, response)
-
-        token = secrets.token_urlsafe(32)
-        now = int(time.time())
-        with db(write=True) as conn:
-            conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user["id"],))
-            conn.execute(
-                "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-                (token_hash(token), user["id"], now + RESET_TTL),
-            )
-            audit(conn, "password_reset.requested", actor={"id": user["id"]}, target="account", ip=self.client_address[0])
-        base = PUBLIC_BASE_URL or ("https" if HTTPS_ONLY else "http") + "://" + self.headers.get("Host", "localhost")
-        send_reset_email(user["email"], base + "/reset-password.html?token=" + quote(token, safe=""))
-        return self._json(200, response)
-
-    def api_password_reset_confirm(self, payload):
-        token = str(payload.get("token", ""))
-        password = str(payload.get("password", ""))
-        message = valid_new_password(password)
-        if not token or len(token) > 512:
-            return self._json(400, {"error": "This reset link is invalid or has expired."})
-        if message:
-            return self._json(400, {"error": "Please fix the highlighted field.", "fields": {"password": message}})
-        now = int(time.time())
-        with db(write=True) as conn:
-            row = conn.execute(
-                "SELECT user_id FROM password_reset_tokens WHERE token_hash = ? AND expires_at >= ? AND used_at IS NULL",
-                (token_hash(token), now),
-            ).fetchone()
-            if row is None:
-                return self._json(400, {"error": "This reset link is invalid or has expired."})
-            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), row["user_id"]))
-            conn.execute("UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ?", (now, token_hash(token)))
-            conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
-            audit(conn, "password_reset.completed", actor={"id": row["user_id"]}, target="account", ip=self.client_address[0])
-        return self._json(200, {"ok": True})
 
     def api_login(self, payload):
         username = str(payload.get("username", "")).strip()
@@ -1928,6 +1890,117 @@ class Handler(BaseHTTPRequestHandler):
                     )
         # 204 carries no body, only the cookie that drops the session
         self._send(204, b"", None, [("Cache-Control", "no-store"), self._clear_cookie()])
+
+    def api_forgot_password(self, payload):
+        """Request a password-reset email. Always returns 200 to avoid email enumeration."""
+        email = str(payload.get("email", "")).strip().lower()
+        if not email or not EMAIL_RE.match(email):
+            return self._json(400, {"error": "Enter a valid email address."})
+
+        # Always show the same message so attackers cannot probe for accounts
+        success_msg = {
+            "ok": True,
+            "message": "If an account exists for that email, a reset link has been sent. Check your inbox.",
+        }
+
+        with db(write=True) as conn:
+            row = conn.execute(
+                "SELECT id, username, email FROM users WHERE email = ?",
+                (email,),
+            ).fetchone()
+            if row is None:
+                return self._json(200, success_msg)
+
+            raw_token = create_password_reset(conn, row["id"])
+            audit(
+                conn,
+                "account.forgot_password",
+                actor={"id": row["id"], "username": row["username"]},
+                target=row["email"],
+                ip=self.client_address[0],
+            )
+
+        # Build the reset link
+        base = PUBLIC_BASE_URL
+        if not base:
+            # Best-effort from the request Host header
+            host = self.headers.get("Host", "localhost:8000")
+            scheme = "https" if HTTPS_ONLY else "http"
+            base = f"{scheme}://{host}"
+        reset_url = f"{base}/reset-password.html?token={raw_token}"
+
+        html = f"""
+        <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2 style="color: #d81f30;">Reset your Northlight password</h2>
+          <p>Hi {row['username']},</p>
+          <p>We received a request to reset your password. Click the button below. This link expires in 1 hour.</p>
+          <p style="margin: 28px 0;">
+            <a href="{reset_url}"
+               style="background:#d81f30;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">
+              Reset password
+            </a>
+          </p>
+          <p style="color:#666;font-size:13px;">If you did not ask for this, you can ignore this email.</p>
+          <p style="color:#999;font-size:12px;word-break:break-all;">Or copy this link:<br>{reset_url}</p>
+        </div>
+        """
+
+        sent = send_email(row["email"], "Reset your Northlight password", html)
+        if not sent:
+            # Still return success to the user; log the failure for the operator
+            print(f"Failed to send reset email to {row['email']}")
+        return self._json(200, success_msg)
+
+    def api_reset_password(self, payload):
+        """Set a new password using a valid reset token."""
+        token = str(payload.get("token", "")).strip()
+        password = str(payload.get("password", ""))
+
+        if not token:
+            return self._json(400, {"error": "Missing reset token."})
+        if len(password) < MIN_PASSWORD:
+            return self._json(400, {"error": f"Use at least {MIN_PASSWORD} characters.", "fields": {"password": f"Use at least {MIN_PASSWORD} characters."}})
+        if not re.search(r"[A-Za-z]", password):
+            return self._json(400, {"error": "Add at least one letter.", "fields": {"password": "Add at least one letter."}})
+        if not re.search(r"\d", password):
+            return self._json(400, {"error": "Add at least one number.", "fields": {"password": "Add at least one number."}})
+        if not re.search(r"[^A-Za-z0-9]", password):
+            return self._json(400, {"error": "Add at least one symbol.", "fields": {"password": "Add at least one symbol."}})
+
+        token_hash_val = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            row = conn.execute(
+                "SELECT pr.user_id, pr.expires_at, pr.used_at, u.username "
+                "FROM password_resets pr JOIN users u ON u.id = pr.user_id "
+                "WHERE pr.token_hash = ?",
+                (token_hash_val,),
+            ).fetchone()
+
+            if row is None or row["used_at"] is not None or row["expires_at"] < now:
+                return self._json(400, {"error": "This reset link is invalid or has expired. Request a new one."})
+
+            new_hash = hash_password(password)
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_hash, row["user_id"]),
+            )
+            conn.execute(
+                "UPDATE password_resets SET used_at = ? WHERE token_hash = ?",
+                (now, token_hash_val),
+            )
+            # Drop all existing sessions so old devices are logged out
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+            audit(
+                conn,
+                "account.reset_password",
+                actor={"id": row["user_id"], "username": row["username"]},
+                target=row["username"],
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True, "message": "Password updated. You can sign in now."})
 
     def api_postcode(self):
         """Verify one ZIP / postal code through Geoapify, with a SQLite cache."""

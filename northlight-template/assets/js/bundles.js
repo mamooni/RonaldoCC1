@@ -61,16 +61,97 @@
     return Math.max(1, Math.ceil(total / pageSize()));
   }
 
+
+  function showBuyToast(message, tone, options) {
+    options = options || {};
+    tone = tone || "info";
+
+    // Remove any existing toast
+    var old = document.querySelector(".nl-toast-backdrop");
+    if (old) old.remove();
+
+    var backdrop = document.createElement("div");
+    backdrop.className = "nl-toast-backdrop";
+    backdrop.setAttribute("role", "alertdialog");
+    backdrop.setAttribute("aria-modal", "true");
+
+    var iconChar = tone === "ok" ? "✓" : tone === "bad" ? "!" : "i";
+    var title =
+      tone === "bad"
+        ? "Payment failed"
+        : tone === "ok"
+          ? "Purchase complete"
+          : "Notice";
+
+    // Special title for insufficient funds
+    if (tone === "bad" && /insufficient/i.test(message)) {
+      title = "Insufficient balance";
+    }
+
+    var toast = document.createElement("div");
+    toast.className = "nl-toast nl-toast--" + tone;
+    toast.innerHTML =
+      '<div class="nl-toast__icon" aria-hidden="true">' +
+      iconChar +
+      "</div>" +
+      '<p class="nl-toast__title"></p>' +
+      '<p class="nl-toast__body"></p>' +
+      '<div class="nl-toast__actions"></div>';
+
+    toast.querySelector(".nl-toast__title").textContent = title;
+    toast.querySelector(".nl-toast__body").textContent = message;
+
+    var actions = toast.querySelector(".nl-toast__actions");
+
+    if (tone === "bad" && /insufficient/i.test(message)) {
+      var dep = document.createElement("a");
+      dep.className = "nl-toast__btn nl-toast__btn--primary";
+      dep.href = "deposit.html";
+      dep.textContent = "Deposit funds";
+      actions.appendChild(dep);
+    }
+
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "nl-toast__btn nl-toast__btn--ghost";
+    close.textContent = tone === "ok" ? "OK" : "Close";
+    close.addEventListener("click", function () {
+      backdrop.remove();
+    });
+    actions.appendChild(close);
+
+    backdrop.addEventListener("click", function (e) {
+      if (e.target === backdrop) backdrop.remove();
+    });
+
+    backdrop.appendChild(toast);
+    document.body.appendChild(backdrop);
+    close.focus({ preventScroll: true });
+
+    if (tone === "ok") {
+      window.setTimeout(function () {
+        if (backdrop.parentNode) backdrop.remove();
+      }, 3200);
+    }
+  }
+
+
   function note(message, tone) {
-    if (!ui.note) return;
     if (!message) {
-      ui.note.hidden = true;
-      ui.note.textContent = "";
+      if (ui.note) {
+        ui.note.hidden = true;
+        ui.note.textContent = "";
+      }
       return;
     }
-    ui.note.hidden = false;
-    ui.note.className = "bundles__note bundles__note--" + (tone || "info");
-    ui.note.textContent = message;
+    if (ui.note) {
+      ui.note.hidden = false;
+      ui.note.className = "bundles__note bundles__note--" + (tone || "info");
+      ui.note.textContent = message;
+    }
+    if (tone === "bad" || tone === "ok") {
+      showBuyToast(message, tone);
+    }
   }
 
   function paintWallet(balance) {
