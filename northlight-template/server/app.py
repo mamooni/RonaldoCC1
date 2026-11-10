@@ -1639,31 +1639,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._not_allowed
         raise AttributeError(name)
 
-def _get(self):
-    path = self.path.split("?")[0]
-    if page_throttle.hit(self.client_address[0]):
-        return self._error(429, "Too many requests. Slow down.")
+    def _get(self):
+        path = self.path.split("?")[0]
+        if page_throttle.hit(self.client_address[0]):
+            return self._error(429, "Too many requests. Slow down.")
 
-    if path == "/api/me":
-        return self.api_me()
-    if path == "/api/public-config":
-        return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
-    if path == "/api/orders":
-        return self.api_orders()
-    if path == "/api/payments":
-        return self.api_my_payments()
-    if path == "/api/admin/data":
-        return self.api_admin_data()
-    if path == "/api/bundles":
-        return self.api_bundles()
-    if path.startswith("/api/postcode"):
-        return self.api_postcode()
-    if path.startswith("/api/"):
-        return self._error(404, "Unknown endpoint.")
-    if path == "/api":
-        return self._error(404, "Unknown endpoint.")
+        if path == "/api/me":
+            return self.api_me()
+        if path == "/api/public-config":
+            return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
+        if path == "/api/orders":
+            return self.api_orders()
+        if path == "/api/payments":
+            return self.api_my_payments()
+        if path == "/api/admin/data":
+            return self.api_admin_data()
+        if path == "/api/bundles":
+            return self.api_bundles()
+        if path.startswith("/api/postcode"):
+            return self.api_postcode()
+        if path.startswith("/api/"):
+            return self._error(404, "Unknown endpoint.")
+        if path == "/api":
+            return self._error(404, "Unknown endpoint.")
 
-    return self.serve_static(path)
+        return self.serve_static(path)
 
     def _post(self, path=None):
         path = (path or self.path).split("?")[0]
