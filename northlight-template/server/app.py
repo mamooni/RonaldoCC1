@@ -1705,73 +1705,75 @@ def _get(self):
         with db() as conn:
             return user_for_token(conn, token)
 
+   
     def api_signup(self, payload):
-    values, errors = validate_signup(payload)
+        values, errors = validate_signup(payload)
 
-    if not verify_turnstile(
-        str(payload.get("turnstile_token", "")),
-        self.client_address[0]
-    ):
-        errors["captcha"] = "Human verification failed. Please try again."
+        if not verify_turnstile(
+            str(payload.get("turnstile_token", "")),
+            self.client_address[0]
+        ):
+            errors["captcha"] = "Human verification failed. Please try again."
 
-    if errors:
-        return self._json(
-            400, {"error": "Please fix the highlighted fields.", "fields": errors}
-        )
+        if errors:
+            return self._json(
+                400, {"error": "Please fix the highlighted fields.", "fields": errors}
+            )
 
-    password_hash = hash_password(values["password"])
-    now = int(time.time())
+        password_hash = hash_password(values["password"])
+        now = int(time.time())
 
-    try:
-        with db(write=True) as conn:
-            existing = conn.execute(
-                "SELECT username, email FROM users WHERE username = ? OR email = ?",
-                (values["username"], values["email"]),
-            ).fetchone()
+        try:
+            with db(write=True) as conn:
+                existing = conn.execute(
+                    "SELECT username, email FROM users WHERE username = ? OR email = ?",
+                    (values["username"], values["email"]),
+                ).fetchone()
 
-            if existing:
-                if existing["username"].lower() == values["username"].lower():
-                    errors["username"] = "That username is taken."
-                if existing["email"].lower() == values["email"].lower():
-                    errors["email"] = "That email is already registered."
-                return self._json(
-                    409,
-                    {"error": "That account already exists.", "fields": errors},
+                if existing:
+                    if existing["username"].lower() == values["username"].lower():
+                        errors["username"] = "That username is taken."
+                    if existing["email"].lower() == values["email"].lower():
+                        errors["email"] = "That email is already registered."
+                    return self._json(
+                        409,
+                        {"error": "That account already exists.", "fields": errors},
+                    )
+
+                cursor = conn.execute(
+                    "INSERT INTO users (username, email, password_hash, created_at, balance_cents) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (values["username"], values["email"], password_hash, now, NEW_USER_CENTS),
                 )
-
-            cursor = conn.execute(
-                "INSERT INTO users (username, email, password_hash, created_at, balance_cents) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (values["username"], values["email"], password_hash, now, NEW_USER_CENTS),
+                user_id = cursor.lastrowid
+                token = new_session(conn, user_id)
+                audit(
+                    conn,
+                    "account.signup",
+                    actor={"id": user_id, "username": values["username"]},
+                    target=values["username"],
+                    detail=values["email"],
+                    ip=self.client_address[0],
+                )
+        except sqlite3.IntegrityError:
+            return self._json(
+                409,
+                {
+                    "error": "That account already exists.",
+                    "fields": {"username": "That username is taken."},
+                },
             )
-            user_id = cursor.lastrowid
-            token = new_session(conn, user_id)
-            audit(
-                conn,
-                "account.signup",
-                actor={"id": user_id, "username": values["username"]},
-                target=values["username"],
-                detail=values["email"],
-                ip=self.client_address[0],
-            )
-    except sqlite3.IntegrityError:
-        return self._json(
-            409,
-            {
-                "error": "That account already exists.",
-                "fields": {"username": "That username is taken."},
-            },
-        )
 
-    user = {
-        "id": user_id,
-        "username": values["username"],
-        "email": values["email"],
-        "created_at": now,
-        "role": "user",
-        "balance": dollars(NEW_USER_CENTS),
-    }
-    return self._json(201, {"user": user}, [self._session_cookie(token)])
+        user = {
+            "id": user_id,
+            "username": values["username"],
+            "email": values["email"],
+            "created_at": now,
+            "role": "user",
+            "balance": dollars(NEW_USER_CENTS),
+        }
+        return self._json(201, {"user": user}, [self._session_cookie(token)])
+
 
 
     def api_login(self, payload):
