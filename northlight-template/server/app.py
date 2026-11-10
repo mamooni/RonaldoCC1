@@ -2534,6 +2534,12 @@ class Handler(BaseHTTPRequestHandler):
 
         goods_id = str(payload.get("id") or "").strip()
         item = goods_catalogue().get(goods_id)
+
+
+        print("PURCHASE DEBUG:")
+        print("Received ID:", goods_id, "Matched item:", item)
+
+        
         if item is None:
             return self._json(404, {"error": "That item is no longer in the catalogue."})
 
