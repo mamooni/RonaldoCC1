@@ -101,6 +101,17 @@ MYSQL = {
 SESSION_COOKIE = "nl_session"
 SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
 
+TURNSTILE_SITE_KEY = os.environ.get("NL_TURNSTILE_SITE_KEY", "").strip()
+TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
+SMTP_HOST = os.environ.get("NL_SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("NL_SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("NL_SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("NL_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("NL_SMTP_FROM", "").strip()
+RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("NL_RESEND_FROM", "").strip()
+PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
+
 MAX_BODY = 8 * 1024       # 8 KB is plenty for these forms
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
 
@@ -111,14 +122,6 @@ HTTPS_ONLY = os.environ.get("NL_HTTPS", "") not in ("", "0", "false", "no")
 # pages in an iframe; turn it on for a real deployment.
 STRICT_HEADERS = os.environ.get("NL_STRICT_HEADERS", "") not in ("", "0", "false", "no")
 
-# Cloudflare Turnstile (CAPTCHA). Set NL_TURNSTILE_SECRET in production.
-TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
-
-# Resend (email). Used for password-reset links.
-RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "").strip()
-RESEND_FROM = os.environ.get("NL_RESEND_FROM", "Northlight <onboarding@resend.dev>").strip()
-# Public base URL of the site (used in reset links). Example: https://northlight.onrender.com
-PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
 
 # Refuse to boot with the built-in admin password unless explicitly allowed.
 ALLOW_DEFAULT_ADMIN = os.environ.get("NL_ALLOW_DEFAULT_ADMIN", "") not in (
