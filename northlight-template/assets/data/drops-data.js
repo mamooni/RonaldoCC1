@@ -1406,17 +1406,9 @@ window.NL_DROPS = [
 
 (function () {
     const adjectives = [
-        "Amber", "Velvet", "Nova", "Silver", "Urban",
-        "Golden", "Crystal", "Pixel", "Midnight", "Lunar",
-        "Modern", "Hidden", "Arctic", "Royal", "Neon",
-        "Sage", "Solar", "Wild", "Cosmic", "Elegant"
-    ];
-
-    const nouns = [
-        "Studio", "Atlas", "Canvas", "Orbit", "Horizon",
-        "Archive", "Motion", "Craft", "Vision", "Palette",
-        "Signal", "Market", "Foundry", "Frame", "Collective",
-        "Echo", "District", "Elements", "Vault", "Concept"
+        "HQ", "EMAIL_PHONE", "Email", "Email_IP", "PHONE_IP_EMAIL",
+        "Hq2", "HQ3"
+       
     ];
 
     const types = [
@@ -1424,7 +1416,20 @@ window.NL_DROPS = [
         "Essentials", "System", "Works", "Set", "Series"
     ];
 
-    // Stable hash: the same product gets the same values on refresh.
+    const from = [
+        "super339", "cards", "goodness12", "zeng", "eddir",
+        "bree556", "seugh", "zverhh", "mett", "crow3", "rudie22",
+        "cards#2", "anedsauq" "grtu88", "trjkbd7", "gytyjhj887", "sandra", "austeen",
+    ];
+
+
+
+    // Fixed starting date.
+    const START_DATE = new Date(2026, 10, 10, 12, 0, 0);
+
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+
     function hash(text) {
         let value = 2166136261;
 
@@ -1445,41 +1450,46 @@ window.NL_DROPS = [
                String(mins).padStart(2, "0");
     }
 
+    function formatDate(date) {
+        return date.getDate() + " " +
+               date.toLocaleString("en-GB", { month: "short" }) + " " +
+               date.getFullYear();
+    }
+
     window.NL_DROPS.forEach(function (item, index) {
         const originalKey =
             String(item.title) + "|" +
-            String(item.creator) + "|" + index;
+            String(item.from) + "|" + index;
 
         const seed = hash(originalKey);
 
         const adjective = adjectives[seed % adjectives.length];
-        const noun = nouns[Math.floor(seed / 7) % nouns.length];
-        const type = types[Math.floor(seed / 31) % types.length];
+        
+        const type = types[Math.floor(seed / 38) % types.length];
 
-        // Give each product a generated name.
-        item.title = adjective + " " + noun + " " + type;
+        // Generate a stable product name.
+        const generatedName = adjective + " " + " " + type;
 
-        // First seven products are always dated today.
-        // Remaining products are randomly distributed into future dates.
-        if (index < 7) {
-            item.daysAgo = 0;
-        } else {
-            item.daysAgo = -(1 + (hash(originalKey + "|date") % 14));
-        }
+        // Assign a stable date to each product.
+        const offsetDays = index < 7
+            ? 0
+            : 1 + (hash(originalKey + "|date") % 14);
 
-        // Generate a stable individual time for each product.
+        const productDate = new Date(START_DATE);
+        productDate.setDate(productDate.getDate() + offsetDays);
+
+        // Calculate its age relative to today.
+        item.daysAgo = Math.round(
+            (today.getTime() - productDate.getTime()) / 86400000
+        );
+
+        // Put the date inside the product name.
+        item.title = generatedName + " [" + formatDate(productDate) + "]";
+
+        // Give each product a stable individual time.
         item.time = makeTime(hash(originalKey + "|time"));
+
+        item.blurb = 'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
     });
 })();
 
-
-// 3. Loop through and update everything
-window.NL_DROPS.forEach(item => {
-    // Generate a random 4-digit number for the title variation
-    const randomTitleId = Math.floor(1000 + Math.random() * 9000);
-    
-    // Update the title, creator (mixed username), and blurb fields
-    item.title = `${dropBaseName} #${randomTitleId} [${today}]`;
-    item.creator = generateRandomUsername(7); // Generates a 7-character username like 'x9r2m4b'
-    item.blurb = 'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
-});
