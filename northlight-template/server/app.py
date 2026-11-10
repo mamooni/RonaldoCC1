@@ -922,8 +922,7 @@ def _drops_rows(path):
     try:
         source = path.read_text(encoding="utf-8")
         start = source.index("[", source.index("window.NL_DROPS"))
-        end = source.rindex("]")
-        drops = json.loads(source[start : end + 1])
+        drops, _ = json.JSONDecoder().raw_decode(source[start:])
     except (OSError, ValueError):
         return []
 
