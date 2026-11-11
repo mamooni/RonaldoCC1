@@ -1468,7 +1468,7 @@ window.NL_DROPS = [
         const type = types[Math.floor(seed / 38) % types.length];
 
         // Generate a stable product name.
-        const generatedName = adjective + " " + " " + type;
+        const generatedName = adjective + " " + type + " " + formatDate(productDate) + " from " + username;
 
         // Assign a stable date to each product.
         const offsetDays = index < 7
@@ -1484,7 +1484,7 @@ window.NL_DROPS = [
         );
 
         // Put the date inside the product name.
-        item.title = generatedName + " [" + formatDate(productDate) + "]";
+        item.title = generatedName;
 
         // Give each product a stable individual time.
         item.time = makeTime(hash(originalKey + "|time"));
