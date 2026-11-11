@@ -1406,9 +1406,8 @@ window.NL_DROPS = [
 
 (function () {
     const adjectives = [
-        "HQ", "EMAIL_PHONE", "Email", "Email_IP", "PHONE_IP_EMAIL",
-        "Hq2", "HQ3"
-       
+        "HQ", "EMAIL_PHONE", "Email", "Email_IP",
+        "PHONE_IP_EMAIL", "Hq2", "HQ3"
     ];
 
     const types = [
@@ -1419,12 +1418,10 @@ window.NL_DROPS = [
     const from = [
         "super339", "cards", "goodness12", "zeng", "eddir",
         "bree556", "seugh", "zverhh", "mett", "crow3", "rudie22",
-        "cards#2", "anedsauq" "grtu88", "trjkbd7", "gytyjhj887", "sandra", "austeen",
+        "cards#2", "anedsauq", "grtu88", "trjkbd7", "gytyjhj887",
+        "sandra", "austeen"
     ];
 
-
-
-    // Fixed starting date.
     const START_DATE = new Date(2026, 10, 10, 12, 0, 0);
 
     const today = new Date();
@@ -1459,18 +1456,14 @@ window.NL_DROPS = [
     window.NL_DROPS.forEach(function (item, index) {
         const originalKey =
             String(item.title) + "|" +
-            String(item.from) + "|" + index;
+            String(item.creator) + "|" + index;
 
         const seed = hash(originalKey);
 
         const adjective = adjectives[seed % adjectives.length];
-        
         const type = types[Math.floor(seed / 38) % types.length];
+        const username = from[Math.floor(seed / 13) % from.length];
 
-        // Generate a stable product name.
-        const generatedName = adjective + " " + type + " " + formatDate(productDate) + " from " + username;
-
-        // Assign a stable date to each product.
         const offsetDays = index < 7
             ? 0
             : 1 + (hash(originalKey + "|date") % 14);
@@ -1478,15 +1471,16 @@ window.NL_DROPS = [
         const productDate = new Date(START_DATE);
         productDate.setDate(productDate.getDate() + offsetDays);
 
-        // Calculate its age relative to today.
         item.daysAgo = Math.round(
             (today.getTime() - productDate.getTime()) / 86400000
         );
 
-        // Put the date inside the product name.
-        item.title = generatedName;
+        item.title =
+            adjective + " " +
+            type + " " +
+            formatDate(productDate) +
+            " from " + username;
 
-        // Give each product a stable individual time.
         item.time = makeTime(hash(originalKey + "|time"));
 
         item.blurb = 'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
