@@ -1793,11 +1793,6 @@
     head.setAttribute("aria-controls", panelId);
 
     var title = el("span", "drop__title", item.title);
-    var from = el("span", "drop__from");
-    from.appendChild(document.createTextNode(" from "));
-    var creator = el("b", null, item.creator);
-    from.appendChild(creator);
-    title.appendChild(from);
 
     var chev = el("span", "chevron");
     chev.innerHTML = CHEVRON_SVG;

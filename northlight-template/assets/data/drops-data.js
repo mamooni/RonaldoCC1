@@ -1406,6 +1406,27 @@ window.NL_DROPS = [
 
 (function () {
     const adjectives = [
+        "HQ", "EMAIL_PHONE", "Email", "Email_IP", "PHONE_IP_EMAIL",
+        "Hq2", "HQ3"
+       
+    ];
+
+    const types = [
+        "Collection", "Kit", "Pack", "Library", "Edition",
+        "Essentials", "System", "Works", "Set", "Series"
+    ];
+
+    const from = [
+        "super339", "cards", "goodness12", "zeng", "eddir",
+        "bree556", "seugh", "zverhh", "mett", "crow3", "rudie22",
+        "cards#2", "anedsauq" "grtu88", "trjkbd7", "gytyjhj887", "sandra", "austeen",
+    ];
+
+
+
+  
+(function () {
+    const adjectives = [
         "HQ", "EMAIL_PHONE", "Email", "Email_IP",
         "PHONE_IP_EMAIL", "Hq2", "HQ3"
     ];
@@ -1449,14 +1470,14 @@ window.NL_DROPS = [
 
     function formatDate(date) {
         return date.getDate() + " " +
-               date.toLocaleString("en-GB", { month: "short" }) + " " +
-               date.getFullYear();
+            date.toLocaleString("en-GB", { month: "short" }) + " " +
+            date.getFullYear();
     }
 
     window.NL_DROPS.forEach(function (item, index) {
         const originalKey =
-            String(item.title) + "|";
-            
+            String(item.title) + "|" +
+            String(item.creator) + "|" + index;
 
         const seed = hash(originalKey);
 
@@ -1486,4 +1507,3 @@ window.NL_DROPS = [
         item.blurb = 'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
     });
 })();
-
