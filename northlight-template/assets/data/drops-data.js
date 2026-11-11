@@ -1455,8 +1455,8 @@ window.NL_DROPS = [
 
     window.NL_DROPS.forEach(function (item, index) {
         const originalKey =
-            String(item.title) + "|" +
-            String(item.creator) + "|" + index;
+            String(item.title) + "|";
+            
 
         const seed = hash(originalKey);
 
