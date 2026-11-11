@@ -1423,7 +1423,7 @@ window.NL_DROPS = [
         "trjkbd7", "gytyjhj887", "sandra", "austeen"
     ];
 
-    const START_DATE = new Date(2026, 10, 10, 12, 0, 0);
+    const START_DATE = new Date(2026, 10, 11, 12, 0, 0);
 
     const today = new Date();
     today.setHours(12, 0, 0, 0);
@@ -1467,7 +1467,7 @@ window.NL_DROPS = [
 
         const offsetDays = index < 7
             ? 0
-            : 1 + (hash(originalKey + "|date") % 14);
+            : -(1 + (hash(originalKey + "|date") % 14));
 
         const productDate = new Date(START_DATE);
         productDate.setDate(productDate.getDate() + offsetDays);
