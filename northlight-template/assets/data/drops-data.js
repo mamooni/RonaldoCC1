@@ -1404,27 +1404,7 @@ window.NL_DROPS = [
  }
 ];
 
-(function () {
-    const adjectives = [
-        "HQ", "EMAIL_PHONE", "Email", "Email_IP", "PHONE_IP_EMAIL",
-        "Hq2", "HQ3"
-       
-    ];
 
-    const types = [
-        "Collection", "Kit", "Pack", "Library", "Edition",
-        "Essentials", "System", "Works", "Set", "Series"
-    ];
-
-    const from = [
-        "super339", "cards", "goodness12", "zeng", "eddir",
-        "bree556", "seugh", "zverhh", "mett", "crow3", "rudie22",
-        "cards#2", "anedsauq" "grtu88", "trjkbd7", "gytyjhj887", "sandra", "austeen",
-    ];
-
-
-
-  
 (function () {
     const adjectives = [
         "HQ", "EMAIL_PHONE", "Email", "Email_IP",
@@ -1438,9 +1418,9 @@ window.NL_DROPS = [
 
     const from = [
         "super339", "cards", "goodness12", "zeng", "eddir",
-        "bree556", "seugh", "zverhh", "mett", "crow3", "rudie22",
-        "cards#2", "anedsauq", "grtu88", "trjkbd7", "gytyjhj887",
-        "sandra", "austeen"
+        "bree556", "seugh", "zverhh", "mett", "crow3",
+        "rudie22", "cards#2", "anedsauq", "grtu88",
+        "trjkbd7", "gytyjhj887", "sandra", "austeen"
     ];
 
     const START_DATE = new Date(2026, 10, 10, 12, 0, 0);
@@ -1465,7 +1445,7 @@ window.NL_DROPS = [
         const mins = minutes % 60;
 
         return String(hours).padStart(2, "0") + ":" +
-               String(mins).padStart(2, "0");
+            String(mins).padStart(2, "0");
     }
 
     function formatDate(date) {
@@ -1504,6 +1484,7 @@ window.NL_DROPS = [
 
         item.time = makeTime(hash(originalKey + "|time"));
 
-        item.blurb = 'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
+        item.blurb =
+            'EXTREME AVS✅ Comes with Extra info: Phone+EMAIL+IP🔥 FIRSTHAND';
     });
 })();
