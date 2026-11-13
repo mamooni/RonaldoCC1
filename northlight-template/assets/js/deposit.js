@@ -39,7 +39,7 @@
     eth: {
       code: "ETH",
       network: "Ethereum",
-      address: "5UuxYGZCnvx9N84AcnRCJHy54qKhiovKh13Mr1aHUMDq",
+      address: "0x5b5b52a9f36dda6c6ad9778249aec391588a7ab2",
       rate: 3200,
       decimals: 6,
       fee: 0,
@@ -51,7 +51,7 @@
     ltc: {
       code: "LTC",
       network: "Litecoin",
-      address: "LRmr7g52UmZ2BwgpBvv8xEoTHzNquy1ypK",
+      address: "Lgy7CNUoio9rgJhCAoUQgqmjDyeUHgDYQr",
       rate: 85,
       decimals: 6,
       fee: 0,
@@ -60,6 +60,18 @@
       formatHint:
         "This does not look like a Litecoin address — they start with “L”, “M” or “3”.",
     },
+    sol: {
+      code: "SOL",
+      network: "Solana",
+      address: "BJryhN4KmgVQuq87yy2RuQq8nomH2cPH3qNDuFP7iQQx",
+      rate: 150,
+      decimals: 9,
+      fee: 0,
+      confirm: "Solana confirms in a few seconds",
+      pattern: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+      formatHint:
+        "This does not look like a valid Solana address. Check that it contains 32–44 Base58 characters.",
+},
     "usdt-trc20": {
       code: "USDT",
       network: "TRC-20",
@@ -75,7 +87,7 @@
     "usdt-bep20": {
       code: "USDT",
       network: "BEP-20",
-      address: "0x5b5b52a9f36dda6c6ad9778249aec391588a7ab2",
+      address: "0xa92b7ce26ccf947ef62550c85caceccde84a5482",
       rate: 1,
       decimals: 2,
       fee: 10,
@@ -714,6 +726,7 @@
 
   /* ---- 8. History -------------------------------------------------------- */
 
+  
   function addHistoryRow(entry) {
     var tr = document.createElement("tr");
 
@@ -730,7 +743,13 @@
     var badge = document.createElement("span");
     badge.className =
       entry.status === "completed" ? "status status--ok" : "status status--pending";
-    badge.textContent = entry.status === "completed" ? "Completed" : "Pending review";
+    badge.textContent =
+      entry.status === "completed"
+        ? "Completed"
+        : entry.status === "failed"
+          ? "Failed — Contact support"
+          : "Pending review";
+
     status.appendChild(badge);
 
     tr.appendChild(date);
@@ -770,7 +789,11 @@
             date: dateTime(new Date(payment.created_at * 1000)),
             label: payment.asset + " · " + payment.network,
             amount: payment.amount,
-            status: payment.status === "confirmed" ? "completed" : "pending",
+            status: payment.status === "confirmed"
+              ? "completed"
+              : payment.status === "failed"
+                ? "failed"
+                : "pending",
           });
         });
       })
