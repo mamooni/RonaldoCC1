@@ -404,12 +404,12 @@
 
     ui.dCredit.textContent =
       c.fee > 0
-        ? "Credited when an admin confirms: " +
+        ? "Credited when deposit is successful: " +
           money(credited) +
           " (" +
           money(c.fee) +
           " fee deducted)."
-        : "Credited when an admin confirms: " + money(credited) + ".";
+        : "Credited when the deposit is successful: " + money(credited) + ".";
 
     // coin badge in the dialog title
     var option = ui.currencyList.querySelector('[data-value="' + key + '"]');

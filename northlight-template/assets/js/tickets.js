@@ -93,7 +93,7 @@
     clearNote();
     show(
       "Ticket " + list[list.length - 1].ref + " submitted — our team replies in Messages. " +
-        "This is a demo, so nothing was actually sent.",
+        "We will get back to you soon.",
       "ok"
     );
     if (subject) subject.focus();

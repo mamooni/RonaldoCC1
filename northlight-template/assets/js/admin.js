@@ -92,7 +92,7 @@
 
       tr.appendChild(cell("#" + payment.id, "atable__mono"));
       tr.appendChild(cell(payment.username));
-      tr.appendChild(cell(money(payment.amount) + " " + payment.asset, "atable__mono"));
+      tr.appendChild(cell(money(payment.amount) + " " + payment.asset + " · " + payment.network,"atable__mono"));    
       tr.appendChild(cell(stamp(payment.created_at), "atable__when"));
 
       var actions = document.createElement("td");
@@ -133,7 +133,7 @@
       var tr = document.createElement("tr");
       tr.appendChild(cell("#" + payment.id, "atable__mono"));
       tr.appendChild(cell(payment.username));
-      tr.appendChild(cell(money(payment.amount) + " " + payment.asset, "atable__mono"));
+      tr.appendChild(cell(money(payment.amount) + " " + payment.asset + " . " + payment.network,"atable__mono"));
       tr.appendChild(cell(stamp(payment.created_at), "atable__when"));
 
       var status = document.createElement("td");
