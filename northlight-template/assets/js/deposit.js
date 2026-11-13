@@ -660,9 +660,7 @@
     }
 
     announce(
-      "Payment details submitted. Deposit #" +
-        (id === undefined ? "" : id) +
-        " is awaiting verification."
+      "Payment details submitted. Deposit is awaiting verification."
     );
   }
 
