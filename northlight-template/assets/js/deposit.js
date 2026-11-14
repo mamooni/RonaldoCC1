@@ -880,21 +880,67 @@ function addHistoryRow(entry) {
   ) {
     badge.className = "status status--ok";
     badge.textContent = "Completed";
+
   } else if (entry.status === "failed") {
     badge.className = "status status--failed";
-    badge.textContent = "Failed — Contact support";
+    badge.textContent = "Failed";
+
   } else if (entry.status === "cancelled") {
     badge.className = "status status--failed";
     badge.textContent = "Cancelled";
+
   } else if (entry.status === "awaiting_payment") {
     badge.className = "status status--pending";
     badge.textContent = "Awaiting payment";
+
   } else {
     badge.className = "status status--pending";
-    badge.textContent = "Pending review";
+    badge.textContent = "Processing";
   }
 
   statusCell.appendChild(badge);
+
+  if (entry.status === "failed") {
+    var supportBox = document.createElement("div");
+    supportBox.className = "telegram-support";
+
+    var message = document.createElement("p");
+    message.textContent =
+      "Need help? Contact our support team:";
+
+    supportBox.appendChild(message);
+
+    var supportAccounts = [
+      "Ronaldosupport1",
+      "Ronaldosupp",
+      "Rippedjews"
+    ];
+
+    var messageText =
+      "Hello, I need help with deposit #" +
+      entry.id +
+      " (" +
+      money(entry.amount) +
+      ").";
+
+    supportAccounts.forEach(function (username) {
+      var link = document.createElement("a");
+
+      link.href =
+        "https://t.me/" +
+        username +
+        "?text=" +
+        encodeURIComponent(messageText);
+
+      link.textContent = "@" + username;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+
+      supportBox.appendChild(link);
+    });
+
+    statusCell.appendChild(supportBox);
+  }
 
   tr.appendChild(dateCell);
   tr.appendChild(currencyCell);
@@ -947,6 +993,7 @@ function addHistoryRow(entry) {
           var date = parseServerDate(payment.created_at);
 
           addHistoryRow({
+            id: payment.id,
             date: dateTime(date),
             label:
               (payment.asset || "") +
