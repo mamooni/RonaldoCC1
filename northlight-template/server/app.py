@@ -383,15 +383,20 @@ class _MySQLConn:
         self._conn.close()
 
 
+
 def _mysql_connect():
     try:
         import pymysql
         import pymysql.cursors
-    except ImportError:  # pragma: no cover - configuration problem, not a bug
+    except ImportError:  # pragma: no cover
         raise SystemExit(
             "NL_DB_KIND=mysql needs PyMySQL. Install it with:\n"
             "    python3 -m pip install pymysql"
         )
+
+    HERE = Path(__file__).resolve().parent
+    ca_path = HERE / "isrgrootx1.pem"
+
     conn = pymysql.connect(
         **MYSQL,
         cursorclass=pymysql.cursors.DictCursor,
@@ -399,6 +404,9 @@ def _mysql_connect():
         connect_timeout=10,
         read_timeout=30,
         write_timeout=30,
+        ssl_ca=str(ca_path),
+        ssl_verify_cert=True,
+        ssl_verify_identity=True,
     )
     return _MySQLConn(conn)
 
@@ -695,7 +703,7 @@ def prune_sessions(conn):
     return removed
 
 
-MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes")
+MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes", "password_resets")
 
 
 def init_mysql():

@@ -144,6 +144,23 @@ CREATE TABLE IF NOT EXISTS `postcodes` (
     PRIMARY KEY (`country`, `code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+-- ---------------------------------------------------------------------------
+-- Password resets
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `password_resets` (
+    `token_hash` CHAR(64)     NOT NULL,
+    `user_id`    INT UNSIGNED NOT NULL,
+    `expires_at` BIGINT       NOT NULL,
+    `created_at` BIGINT       NOT NULL,
+    `used_at`    BIGINT       NULL,
+    PRIMARY KEY (`token_hash`),
+    KEY `password_resets_user` (`user_id`),
+    CONSTRAINT `password_resets_user_fk` FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ---------------------------------------------------------------------------
