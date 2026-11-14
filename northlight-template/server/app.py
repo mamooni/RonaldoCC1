@@ -59,7 +59,7 @@ import urllib.parse
 import urllib.error
 import threading
 import traceback
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_UP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -111,6 +111,86 @@ SMTP_FROM = os.environ.get("NL_SMTP_FROM", "").strip()
 RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "")
 RESEND_FROM = os.environ.get("NL_RESEND_FROM", "").strip()
 PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
+# CoinGecko API configuration
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "").strip()
+COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
+
+
+# Cache prices briefly to avoid unnecessary API calls.
+COINGECKO_PRICE_CACHE = None
+COINGECKO_PRICE_CACHE_TIME = 0
+COINGECKO_PRICE_CACHE_LOCK = threading.Lock()
+COINGECKO_PRICE_CACHE_TTL = 60
+
+COINGECKO_COINS = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "LTC": "litecoin",
+    "SOL": "solana",
+    "USDT": "tether",
+}
+
+
+def get_crypto_prices():
+    """Return validated USD prices from CoinGecko. Never use fallback rates."""
+    global COINGECKO_PRICE_CACHE, COINGECKO_PRICE_CACHE_TIME
+
+    if not COINGECKO_API_KEY:
+        raise RuntimeError("CoinGecko API key is not configured.")
+
+    with COINGECKO_PRICE_CACHE_LOCK:
+        now = time.time()
+
+        if (
+            COINGECKO_PRICE_CACHE is not None
+            and now - COINGECKO_PRICE_CACHE_TIME < COINGECKO_PRICE_CACHE_TTL
+        ):
+            return COINGECKO_PRICE_CACHE.copy()
+
+        params = urllib.parse.urlencode({
+            "ids": ",".join(COINGECKO_COINS.values()),
+            "vs_currencies": "usd",
+            "precision": "full",
+        })
+
+        url = f"{COINGECKO_API_URL}/simple/price?{params}"
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "x-cg-demo-api-key": COINGECKO_API_KEY,
+                "Accept": "application/json",
+                "User-Agent": "Northlight/1.0",
+            },
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not retrieve live crypto prices: {type(exc).__name__}"
+            ) from exc
+
+        prices = {}
+
+        for symbol, coin_id in COINGECKO_COINS.items():
+            try:
+                price = Decimal(str(data[coin_id]["usd"]))
+            except (KeyError, TypeError, InvalidOperation):
+                raise RuntimeError(f"Missing or invalid CoinGecko price for {symbol}.")
+
+            if not price.is_finite() or price <= 0:
+                raise RuntimeError(f"Invalid CoinGecko price for {symbol}.")
+
+            prices[symbol] = price
+
+        COINGECKO_PRICE_CACHE = prices
+        COINGECKO_PRICE_CACHE_TIME = now
+
+        return prices.copy()
+
 
 MAX_BODY = 8 * 1024       # 8 KB is plenty for these forms
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
@@ -1391,6 +1471,7 @@ POST_ROUTES = {
     "/api/forgot-password": "api_forgot_password",
     "/api/reset-password": "api_reset_password",
     "/api/payments": "api_create_payment",
+    "/api/payment-sent": "api_report_payment",
     "/api/purchase": "api_purchase",
     "/api/admin/payment": "api_admin_payment",
 }
@@ -2263,13 +2344,18 @@ class Handler(BaseHTTPRequestHandler):
         per_user = {}
         for pay in payments:
             tally = per_user.setdefault(
-                pay["user_id"], {"pending": 0, "confirmed": 0, "failed": 0}
+                pay["user_id"],
+                {
+                    "awaiting_payment": 0,
+                    "pending": 0,
+                    "confirmed": 0,
+                    "failed": 0,
+                },
             )
-            tally[pay["status"]] += 1
 
         for user in users:
             user["payments"] = per_user.get(
-                user["id"], {"pending": 0, "confirmed": 0, "failed": 0}
+                user["id"], {"pending": 0, "confirmed": 0, "failed": 0, "awaiting_payment": 0}
             )
             user["paid"] = user["payments"]["confirmed"] > 0
 
@@ -2278,6 +2364,7 @@ class Handler(BaseHTTPRequestHandler):
             "users": len([u for u in users if u["role"] != "admin"]),
             "admins": len([u for u in users if u["role"] == "admin"]),
             "payers": len([u for u in users if u["paid"]]),
+            "awaiting_payment": len([p for p in payments if p["status"] == "awaiting_payment"]),
             "pending": len([p for p in payments if p["status"] == "pending"]),
             "confirmed": len(confirmed),
             "failed": len([p for p in payments if p["status"] == "failed"]),
@@ -2388,61 +2475,205 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
+    
+   
     def api_create_payment(self, payload):
-        """A signed-in visitor asks to deposit; the request waits for an admin."""
+        """Create a pending deposit with a server-calculated crypto quote."""
         user = self._current_user()
         if user is None:
-            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
         if payment_throttle.hit(user["id"]):
-            return self._error(429, "Too many deposit requests. Wait a few minutes.")
+            return self._error(
+                429, "Too many deposit requests. Wait a few minutes."
+            )
 
-        cents, problem = parse_cents(payload.get("amount"), low=2500, high=8000000)
-        if problem in ("That is below the minimum.", "That is above the maximum."):
-            return self._json(400, {"error": "Deposits run from $25 to $80,000."})
-        if cents is None:
-            return self._json(400, {"error": problem or "Enter an amount."})
-        if problem:
-            return self._json(400, {"error": problem})
+        cents, problem = parse_cents(
+            payload.get("amount"), low=2500, high=8000000
+        )
 
-        asset = str(payload.get("asset") or "USDT").strip()[:12] or "USDT"
-        network = str(payload.get("network") or "TRC-20").strip()[:12] or "TRC-20"
-        if not re.fullmatch(r"[A-Za-z0-9 .+_-]{1,12}", asset):
-            return self._json(400, {"error": "Unsupported asset."})
-        if not re.fullmatch(r"[A-Za-z0-9 .+_-]{1,12}", network):
-            return self._json(400, {"error": "Unsupported network."})
+        if problem in (
+            "That is below the minimum.",
+            "That is above the maximum.",
+        ):
+            return self._json(
+                400, {"error": "Deposits run from $25 to $80,000."}
+            )
 
-        # A browser that lost the connection may send the same request again.
-        # The key makes that a lookup, not a second payment.
-        request_id = str(payload.get("request_id") or "").strip()[:64]
-        if request_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", request_id):
+        if cents is None or problem:
+            return self._json(
+                400, {"error": problem or "Enter an amount."}
+            )
+
+        asset = str(payload.get("asset") or "").strip().upper()
+        network = str(payload.get("network") or "").strip()
+
+        supported = {
+            ("BTC", "Bitcoin"): {"fee_cents": 0, "decimals": 8},
+            ("ETH", "Ethereum"): {"fee_cents": 0, "decimals": 6},
+            ("LTC", "Litecoin"): {"fee_cents": 0, "decimals": 6},
+            ("SOL", "Solana"): {"fee_cents": 0, "decimals": 9},
+            ("USDT", "TRC-20"): {"fee_cents": 1000, "decimals": 2},
+            ("USDT", "BEP-20"): {"fee_cents": 1000, "decimals": 2},
+        }
+
+        option = supported.get((asset, network))
+        if option is None:
+            return self._json(
+                400, {"error": "Unsupported asset or network."}
+            )
+
+        request_id = str(
+            payload.get("request_id") or ""
+        ).strip()[:64]
+
+        if request_id and not re.fullmatch(
+            r"[A-Za-z0-9_-]{8,64}", request_id
+        ):
             request_id = ""
 
-        with db(write=True) as conn:
-            if request_id:
+        def payment_response(row, replayed=False):
+            payment = {
+                "id": row["id"],
+                "amount": dollars(row["amount_cents"]),
+                "asset": row["asset"],
+                "network": row["network"],
+                "status": row["status"],
+                "network_fee": dollars(
+                    row["network_fee_cents"] or 0
+                ),
+                "send_amount": dollars(
+                    row["send_amount_cents"] or 0
+                ),
+                "quoted_rate": (
+                    str(row["quoted_rate"])
+                    if row["quoted_rate"] is not None
+                    else None
+                ),
+                "crypto_amount": (
+                    str(row["crypto_amount"])
+                    if row["crypto_amount"] is not None
+                    else None
+                ),
+                "quote_expires_at": row["quote_expires_at"],
+            }
+
+            result = {"payment": payment}
+
+            if replayed:
+                result["replayed"] = True
+
+            return result
+
+        # First check: reuse an existing request if its details match.
+        if request_id:
+            with db() as conn:
                 existing = conn.execute(
-                    "SELECT id, amount_cents, asset, network, status FROM payments "
-                    "WHERE user_id = ? AND request_id = ?",
+                    "SELECT id, amount_cents, asset, network, status, "
+                    "network_fee_cents, send_amount_cents, quoted_rate, "
+                    "crypto_amount, quote_expires_at "
+                    "FROM payments WHERE user_id = ? AND request_id = ?",
                     (user["id"], request_id),
                 ).fetchone()
-                if existing is not None:
+
+            if existing is not None:
+                if (
+                    int(existing["amount_cents"]) != cents
+                    or existing["asset"] != asset
+                    or existing["network"] != network
+                ):
                     return self._json(
-                        200,
+                        409,
                         {
-                            "payment": {
-                                "id": existing["id"],
-                                "amount": dollars(existing["amount_cents"]),
-                                "asset": existing["asset"],
-                                "network": existing["network"],
-                                "status": existing["status"],
-                            },
-                            "replayed": True,
+                            "error": (
+                                "This request ID was already used for a "
+                                "different deposit. Start a new deposit."
+                            )
                         },
                     )
 
+                return self._json(
+                    200, payment_response(existing, replayed=True)
+                )
+
+        # Get the exchange rate from the server.
+        try:
+            prices = get_crypto_prices()
+
+            rate = prices[asset].quantize(
+                Decimal("0.0000000001"),
+                rounding=ROUND_HALF_UP,
+            )
+
+            if rate <= 0:
+                raise RuntimeError("Invalid exchange rate.")
+
+        except Exception:
+            return self._json(
+                503,
+                {
+                    "error": (
+                        "Live crypto prices are temporarily unavailable. "
+                        "Please try again."
+                    )
+                },
+            )
+
+        fee_cents = option["fee_cents"]
+        send_cents = cents + fee_cents
+
+        send_usd = Decimal(send_cents) / Decimal(100)
+        quantum = Decimal(1).scaleb(-option["decimals"])
+
+        crypto_amount = (send_usd / rate).quantize(
+            quantum,
+            rounding=ROUND_UP,
+        )
+
+        now = int(time.time())
+        quote_expires_at = now + 600
+
+        # Second check and deposit creation happen in one transaction.
+        with db(write=True) as conn:
+
+            if request_id:
+                existing = conn.execute(
+                    "SELECT id, amount_cents, asset, network, status, "
+                    "network_fee_cents, send_amount_cents, quoted_rate, "
+                    "crypto_amount, quote_expires_at "
+                    "FROM payments WHERE user_id = ? AND request_id = ?",
+                    (user["id"], request_id),
+                ).fetchone()
+
+                if existing is not None:
+                    if (
+                        int(existing["amount_cents"]) != cents
+                        or existing["asset"] != asset
+                        or existing["network"] != network
+                    ):
+                        return self._json(
+                            409,
+                            {
+                                "error": (
+                                    "This request ID was already used for a "
+                                    "different deposit. Start a new deposit."
+                                )
+                            },
+                        )
+
+                    return self._json(
+                        200, payment_response(existing, replayed=True)
+                    )
+
             waiting = conn.execute(
-                "SELECT COUNT(*) AS n FROM payments WHERE user_id = ? AND status = 'pending'",
+                "SELECT COUNT(*) AS n FROM payments "
+                "WHERE user_id = ? "
+                "AND status IN ('awaiting_payment', 'pending')",
                 (user["id"],),
             ).fetchone()["n"]
+
             if waiting >= 20:
                 return self._json(
                     429,
@@ -2456,17 +2687,37 @@ class Handler(BaseHTTPRequestHandler):
 
             cursor = conn.execute(
                 "INSERT INTO payments "
-                "(user_id, amount_cents, asset, network, status, request_id, created_at) "
-                "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-                (user["id"], cents, asset, network, request_id or None, int(time.time())),
+                "(user_id, amount_cents, asset, network, status, request_id, "
+                "created_at, quoted_rate, crypto_amount, quote_expires_at, "
+                "network_fee_cents, send_amount_cents) "
+                "VALUES (?, ?, ?, ?, 'awaiting_payment', ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user["id"],
+                    cents,
+                    asset,
+                    network,
+                    request_id or None,
+                    now,
+                    str(rate),
+                    str(crypto_amount),
+                    quote_expires_at,
+                    fee_cents,
+                    send_cents,
+                ),
             )
+
             payment_id = cursor.lastrowid
+
             audit(
                 conn,
                 "payment.create",
                 actor=user,
                 target=payment_id,
-                detail=f"{dollars(cents):.2f} {asset} / {network}",
+                detail=(
+                    f"{dollars(cents):.2f} USD credit; "
+                    f"{dollars(send_cents):.2f} USD send value; "
+                    f"{crypto_amount} {asset} / {network}"
+                ),
                 ip=self.client_address[0],
             )
 
@@ -2478,10 +2729,82 @@ class Handler(BaseHTTPRequestHandler):
                     "amount": dollars(cents),
                     "asset": asset,
                     "network": network,
-                    "status": "pending",
+                    "status": "awaiting_payment",
+                    "network_fee": dollars(fee_cents),
+                    "send_amount": dollars(send_cents),
+                    "quoted_rate": str(rate),
+                    "crypto_amount": str(crypto_amount),
+                    "quote_expires_at": quote_expires_at,
                 }
             },
         )
+
+    def api_report_payment(self, payload):
+        """Move the customer's own deposit into the admin verification queue."""
+        user = self._current_user()
+        if user is None:
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
+        if payment_throttle.hit(user["id"]):
+            return self._error(429, "Too many payment requests. Please wait.")
+
+        try:
+            payment_id = int(payload.get("id"))
+            if payment_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid payment ID."})
+
+        with db(write=True) as conn:
+            payment = conn.execute(
+                "SELECT id, status FROM payments "
+                "WHERE id = ? AND user_id = ?",
+                (payment_id, user["id"]),
+            ).fetchone()
+
+            if payment is None:
+                return self._json(404, {"error": "Deposit not found."})
+
+            if payment["status"] == "pending":
+                return self._json(
+                    200,
+                    {"ok": True, "id": payment_id, "status": "pending",
+                     "already_reported": True},
+                )
+
+            if payment["status"] != "awaiting_payment":
+                return self._json(
+                    409,
+                    {"error": "This deposit can no longer be reported."},
+                )
+
+            updated = conn.execute(
+                "UPDATE payments SET status = 'pending' "
+                "WHERE id = ? AND user_id = ? AND status = 'awaiting_payment'",
+                (payment_id, user["id"]),
+            )
+
+            if updated.rowcount != 1:
+                return self._json(
+                    409, {"error": "This deposit has already changed."}
+                )
+
+            audit(
+                conn,
+                "payment.reported",
+                actor=user,
+                target=payment_id,
+                detail="Customer reported sending cryptocurrency; awaiting verification.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200,
+            {"ok": True, "id": payment_id, "status": "pending"},
+        )        
+
 
     def api_bundles(self):
         """The ids of the bundles, in page order.

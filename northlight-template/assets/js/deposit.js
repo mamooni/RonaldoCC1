@@ -1,112 +1,96 @@
-/* ==========================================================================
-   Deposit page — deposit.js
-   Two-step deposit flow:
-      1. "Create deposit"  → choose currency + amount
-      2. "Add funds details" → crypto amount, date & time, address, QR
 
-   Sections:
-     1. Currency table (addresses, rates, fees, format checks)
-     2. Elements + state
-     3. Helpers (formatting, storage)
-     4. Step 1 — open the create dialog
-     5. Step 2 — build the details, open it, start confirmations
-     6. Copy buttons
-     7. Confirmation polling (0/3 → 3/3 → credited)
-     8. History table
-     9. Bootstrap
+/* ==========================================================================
+   Northlight — deposit.js
+
+   Deposit workflow:
+   1. Customer selects currency and amount.
+   2. Backend creates the payment and calculates the crypto quote.
+   3. Customer sends crypto to the displayed wallet address.
+   4. Customer reports the payment.
+   5. Admin verifies the transaction and approves or rejects it.
+
+   IMPORTANT:
+   - The frontend never credits a wallet.
+   - The backend is authoritative for prices, fees and payment status.
+   - Do not change the wallet addresses without verifying them independently.
    ========================================================================== */
 
 (function () {
   "use strict";
 
-  /* ---- 1. Currency table ------------------------------------------------- */
+  /* ------------------------------------------------------------------------
+     1. CURRENCY CONFIGURATION
+     ------------------------------------------------------------------------ */
 
-  // `rate` is a fixed demo price (USD per 1 coin) so the page runs offline.
-  // `fee` is the flat USD fee charged on the deposit (USDT only, per the brief).
   var CURRENCIES = {
     btc: {
       code: "BTC",
       network: "Bitcoin",
       address: "1BzKeecKgfRcjSaRdxkv9mmx36TUZzvtYM",
-      rate: 65000,
       decimals: 8,
       fee: 0,
-      confirm: "Bitcoin confirms in roughly 10–60 minutes",
       pattern: /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/,
-      formatHint:
-        "This does not look like a Bitcoin address — legacy addresses start with “1” or “3”.",
+      formatHint: "This does not look like a Bitcoin address — legacy addresses start with 1 or 3."
     },
+
     eth: {
       code: "ETH",
       network: "Ethereum",
       address: "0x5b5b52a9f36dda6c6ad9778249aec391588a7ab2",
-      rate: 3200,
       decimals: 6,
       fee: 0,
-      confirm: "Ethereum confirms in about a minute",
       pattern: /^0x[a-fA-F0-9]{40}$/,
-      formatHint:
-        "This does not look like an Ethereum address — Ethereum addresses start with “0x” followed by 40 hex characters. Check it before sending.",
+      formatHint: "This does not look like an Ethereum address — check the 0x address and its 40 hexadecimal characters."
     },
+
     ltc: {
       code: "LTC",
       network: "Litecoin",
       address: "Lgy7CNUoio9rgJhCAoUQgqmjDyeUHgDYQr",
-      rate: 85,
       decimals: 6,
       fee: 0,
-      confirm: "Litecoin confirms in about 2 minutes",
       pattern: /^[LM3][a-km-zA-HJ-NP-Z1-9]{26,33}$/,
-      formatHint:
-        "This does not look like a Litecoin address — they start with “L”, “M” or “3”.",
+      formatHint: "This does not look like a Litecoin address — they start with L, M or 3."
     },
+
     sol: {
       code: "SOL",
       network: "Solana",
       address: "BJryhN4KmgVQuq87yy2RuQq8nomH2cPH3qNDuFP7iQQx",
-      rate: 150,
       decimals: 9,
       fee: 0,
-      confirm: "Solana confirms in a few seconds",
       pattern: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
-      formatHint:
-        "This does not look like a valid Solana address. Check that it contains 32–44 Base58 characters.",
-},
+      formatHint: "This does not look like a valid Solana address. Check its 32–44 Base58 characters."
+    },
+
     "usdt-trc20": {
       code: "USDT",
       network: "TRC-20",
       address: "TScAz2TJAt2vj7PapWKvcB33LC2QemfKQk",
-      rate: 1,
       decimals: 2,
       fee: 10,
-      confirm: "Tron confirms in a few seconds",
       pattern: /^T[1-9A-HJ-NP-Za-km-z]{33}$/,
-      formatHint:
-        "This does not look like a TRC-20 address — those start with “T” and are 34 characters long.",
+      formatHint: "This does not look like a TRC-20 address — those start with T and are 34 characters long."
     },
+
     "usdt-bep20": {
       code: "USDT",
       network: "BEP-20",
       address: "0xa92b7ce26ccf947ef62550c85caceccde84a5482",
-      rate: 1,
       decimals: 2,
       fee: 10,
-      confirm: "BNB Chain confirms in about 15 seconds",
       pattern: /^0x[a-fA-F0-9]{40}$/,
-      formatHint:
-        "This does not look like an EVM address — those start with “0x” followed by 40 hex characters.",
-    },
+      formatHint: "This does not look like a BEP-20 address — check the 0x address and its 40 hexadecimal characters."
+    }
   };
 
-  // A built *-preview.html has no backend behind it: there is nothing to POST
-  // to, so the flow explains that instead of blaming the network.
   var PREVIEW = !!window.NL_PREVIEW;
-
   var MIN = 25;
   var MAX = 80000;
-  var STEP_DELAY = 2200; // demo pause between confirmations
 
-  /* ---- 2. Elements + state ----------------------------------------------- */
+  /* ------------------------------------------------------------------------
+     2. ELEMENTS AND STATE
+     ------------------------------------------------------------------------ */
 
   function $(id) {
     return document.getElementById(id);
@@ -116,160 +100,224 @@
     openCreate: $("openCreate"),
     createDialog: $("createDialog"),
     detailsDialog: $("detailsDialog"),
+
     currencyButton: $("currencyButton"),
     currencyList: $("currencyList"),
     currencyValue: $("currencyValue"),
     currencyCoin: $("currencyCoin"),
+
     dCoin: $("dCoin"),
+
     amount: $("depositAmount"),
     amountError: $("amountError"),
     createDeposit: $("createDeposit"),
     feeNote: $("feeNote"),
+
     dCrypto: $("dCrypto"),
     dDate: $("dDate"),
     dAddress: $("dAddress"),
     dCredit: $("dCredit"),
     dQr: $("dQr"),
+
     backToCreate: $("backToCreate"),
     paymentDone: $("paymentDone"),
+
     verifyBox: $("verifyBox"),
     verifyText: $("verifyText"),
+
     historyBody: $("historyBody"),
-    balances: document.querySelectorAll(".js-balance"),
+
+    balances: document.querySelectorAll(".js-balance")
   };
 
   var state = {
     currencyKey: "btc",
-    pending: 0, // outstanding deposits awaiting confirmation
-    draft: null, // the amount waiting in the details step
-    sent: false, // has this draft already been filed with the admin?
+    draft: null,
+    sent: false,
+    quote: null,
+    quoteLoading: false
   };
 
-  /* ---- 3. Helpers -------------------------------------------------------- */
+  /* ------------------------------------------------------------------------
+     3. BASIC HELPERS
+     ------------------------------------------------------------------------ */
 
-  function currency() {
-    return CURRENCIES[state.currencyKey];
+  function requireElements() {
+    var required = [
+      "openCreate",
+      "createDialog",
+      "detailsDialog",
+      "currencyButton",
+      "currencyList",
+      "amount",
+      "createDeposit",
+      "dCrypto",
+      "dDate",
+      "dAddress",
+      "dCredit",
+      "dQr",
+      "backToCreate",
+      "paymentDone",
+      "historyBody"
+    ];
+
+    for (var i = 0; i < required.length; i++) {
+      if (!ui[required[i]]) {
+        console.error(
+          "Northlight deposit.js: missing element #" + required[i]
+        );
+        return false;
+      }
+    }
+
+    return true;
   }
 
   function money(value) {
-    return (
-      "$" +
-      value.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
-    );
+    var number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      number = 0;
+    }
+
+    return "$" + number.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
   }
 
   function coinText(value, key) {
-    var c = CURRENCIES[key];
-    var text = value.toFixed(c.decimals);
-    if (c.decimals > 2) {
-      text = text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+    var decimals = CURRENCIES[key].decimals;
+    var number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      return "Unavailable";
     }
-    return text + " " + c.code;
+
+    var result = number.toFixed(decimals);
+
+    if (decimals > 2) {
+      result = result
+        .replace(/(\.\d*?)0+$/, "$1")
+        .replace(/\.$/, "");
+    }
+
+    return result + " " + CURRENCIES[key].code;
   }
 
   function dateTime(date) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      return "Date unavailable";
+    }
+
     return date.toLocaleString("en-US", {
       month: "long",
       day: "2-digit",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-      hour12: true,
+      hour12: true
     });
   }
 
-  var storage = {
-    get: function (key, fallback) {
-      try {
-        var raw = window.localStorage.getItem(key);
-        return raw === null ? fallback : raw;
-      } catch (err) {
-        return fallback;
-      }
-    },
-    set: function (key, value) {
-      try {
-        window.localStorage.setItem(key, value);
-      } catch (err) {
-        /* ignore */
-      }
-    },
-  };
+  function parseServerDate(value) {
+    if (value === null || value === undefined) {
+      return new Date(NaN);
+    }
 
-  function currentBalance() {
-    return parseFloat(storage.get("nl_balance", "24.00")) || 0;
+    if (typeof value === "number" || /^\d+$/.test(String(value))) {
+      var number = Number(value);
+
+      // Treat 10-digit timestamps as seconds and 13-digit as milliseconds.
+      if (number < 100000000000) {
+        number *= 1000;
+      }
+
+      return new Date(number);
+    }
+
+    return new Date(value);
   }
 
-  function setBalance(value) {
-    var formatted = value.toFixed(2);
-    ui.balances.forEach(function (node) {
-      node.textContent = formatted;
-    });
-    storage.set("nl_balance", formatted);
+  function currency() {
+    return CURRENCIES[state.currencyKey];
   }
 
   function showError(message) {
+    if (!ui.amountError) return;
+
     ui.amountError.textContent = message;
     ui.amountError.hidden = false;
     ui.amount.classList.add("is-invalid");
   }
 
   function clearError() {
-    ui.amountError.textContent = "";
-    ui.amountError.hidden = true;
+    if (ui.amountError) {
+      ui.amountError.textContent = "";
+      ui.amountError.hidden = true;
+    }
+
     ui.amount.classList.remove("is-invalid");
   }
 
-  /* ---- 4. Step 1 — create dialog ----------------------------------------- */
-
   function syncFeeNote() {
-    var c = currency();
-    if (c.fee > 0) {
-      ui.feeNote.hidden = false;
+    if (!ui.feeNote) return;
+
+    var fee = currency().fee;
+
+    ui.feeNote.hidden = fee <= 0;
+
+    if (fee > 0) {
       ui.feeNote.textContent =
-        c.code + " has a " + money(c.fee) + " fee to deposit!";
-    } else {
-      ui.feeNote.hidden = true;
+        "USDT deposits include a " +
+        money(fee) +
+        " network fee added to the amount you send.";
     }
   }
 
-  ui.openCreate.addEventListener("click", function () {
-    clearError();
-    ui.amount.value = "";
-    syncFeeNote();
-    ui.createDialog.showModal();
-    ui.currencyButton.focus();
-  });
+  function requestKey() {
+    var value;
 
-  /* -- currency combobox (native <select> replaced so options can carry logos) -- */
+    if (window.crypto && window.crypto.randomUUID) {
+      value = window.crypto.randomUUID().replace(/-/g, "");
+    } else {
+      value =
+        String(Date.now()) +
+        Math.random().toString(36).slice(2);
+    }
+
+    return "dep-" + value.slice(0, 40);
+  }
+
+  function announce(message, preview) {
+    var note = $("depositNote");
+
+    if (!note) return;
+
+    note.classList.toggle(
+      "deposit-note--preview",
+      !!preview
+    );
+
+    note.textContent = message;
+    note.hidden = false;
+
+    window.clearTimeout(announce.timer);
+
+    announce.timer = window.setTimeout(function () {
+      note.hidden = true;
+      note.textContent = "";
+    }, 9000);
+  }
+
+  /* ------------------------------------------------------------------------
+     4. CURRENCY DROPDOWN
+     ------------------------------------------------------------------------ */
 
   function currencyOptions() {
     return Array.prototype.slice.call(
-      ui.currencyList.querySelectorAll(".select__option")
+      ui.currencyList.querySelectorAll("[data-value]")
     );
-  }
-
-  function highlight(index) {
-    currencyOptions().forEach(function (option) {
-      option.classList.remove("is-active");
-    });
-    var list = currencyOptions();
-    if (index < 0 || index >= list.length) return;
-    list[index].classList.add("is-active");
-    if (list[index].scrollIntoView) {
-      list[index].scrollIntoView({ block: "nearest" });
-    }
-  }
-
-  function openList() {
-    ui.currencyList.hidden = false;
-    ui.currencyButton.setAttribute("aria-expanded", "true");
-    highlight(selectedIndex());
-    // move focus into the list so arrow keys drive the highlight
-    ui.currencyList.focus({ preventScroll: true });
   }
 
   function closeList() {
@@ -277,547 +325,849 @@
     ui.currencyButton.setAttribute("aria-expanded", "false");
   }
 
+  function highlight(index) {
+    var options = currencyOptions();
+
+    options.forEach(function (option) {
+      option.classList.remove("is-active");
+    });
+
+    if (index < 0 || index >= options.length) {
+      return;
+    }
+
+    options[index].classList.add("is-active");
+
+    if (options[index].scrollIntoView) {
+      options[index].scrollIntoView({
+        block: "nearest"
+      });
+    }
+  }
+
   function selectedIndex() {
-    var index = currencyOptions().findIndex(function (option) {
+    return currencyOptions().findIndex(function (option) {
       return option.dataset.value === state.currencyKey;
     });
-    return index < 0 ? 0 : index;
+  }
+
+  function openList() {
+    ui.currencyList.hidden = false;
+
+    ui.currencyButton.setAttribute(
+      "aria-expanded",
+      "true"
+    );
+
+    highlight(Math.max(0, selectedIndex()));
+
+    ui.currencyList.focus({
+      preventScroll: true
+    });
   }
 
   function selectCurrency(key) {
-    if (!CURRENCIES[key]) return;
+    if (!CURRENCIES[key]) {
+      return;
+    }
+
     state.currencyKey = key;
 
-    var option = ui.currencyList.querySelector('[data-value="' + key + '"]');
+    var option = ui.currencyList.querySelector(
+      '[data-value="' + key + '"]'
+    );
+
     if (option) {
-      currencyOptions().forEach(function (li) {
-        var on = li === option;
-        li.classList.toggle("is-selected", on);
-        li.setAttribute("aria-selected", on ? "true" : "false");
+      currencyOptions().forEach(function (item) {
+        var selected = item === option;
+
+        item.classList.toggle("is-selected", selected);
+
+        item.setAttribute(
+          "aria-selected",
+          selected ? "true" : "false"
+        );
       });
 
-      // copy the option's badge into the closed button
       var badge = option.querySelector(".coin");
-      if (badge) {
-        ui.currencyCoin.setAttribute("data-coin", badge.dataset.coin);
+
+      if (badge && ui.currencyCoin) {
+        ui.currencyCoin.setAttribute(
+          "data-coin",
+          badge.dataset.coin
+        );
+
         ui.currencyCoin.innerHTML = badge.innerHTML;
       }
-      ui.currencyValue.textContent = option.querySelector("b").textContent;
+
+      if (ui.currencyValue) {
+        var label = option.querySelector("b");
+
+        ui.currencyValue.textContent = label
+          ? label.textContent
+          : key;
+      }
     }
 
     clearError();
     syncFeeNote();
   }
 
-  ui.currencyButton.addEventListener("click", function (event) {
-    event.stopPropagation();
-    ui.currencyList.hidden ? openList() : closeList();
-  });
+  /* ------------------------------------------------------------------------
+     5. DIALOG AND PAYMENT STATE
+     ------------------------------------------------------------------------ */
 
-  ui.currencyButton.addEventListener("keydown", function (event) {
-    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      openList();
-    }
-  });
+  function setBusy(isBusy, label) {
+    ui.paymentDone.disabled = !!isBusy;
 
-  ui.currencyList.addEventListener("click", function (event) {
-    var option = event.target.closest(".select__option");
-    if (!option) return;
-    selectCurrency(option.dataset.value);
-    closeList();
-    ui.currencyButton.focus();
-  });
+    ui.paymentDone.textContent =
+      label ||
+      (isBusy
+        ? "Please wait…"
+        : "I've sent the payment");
 
-  ui.currencyList.addEventListener("keydown", function (event) {
-    var list = currencyOptions();
-    var active = list.findIndex(function (option) {
-      return option.classList.contains("is-active");
-    });
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      highlight(Math.min(active + 1, list.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      highlight(Math.max(active - 1, 0));
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (active >= 0) selectCurrency(list[active].dataset.value);
-      closeList();
-      ui.currencyButton.focus();
-    } else if (event.key === "Escape") {
-      closeList();
-      ui.currencyButton.focus();
-    }
-  });
-
-  document.addEventListener("click", function (event) {
-    if (ui.currencyList.hidden) return;
-    if (!ui.currencyList.contains(event.target)) closeList();
-  });
-
-  ui.createDeposit.addEventListener("click", function () {
-    var c = currency();
-    var amount = parseFloat(ui.amount.value);
-
-    if (!isFinite(amount) || amount <= 0) {
-      showError("Enter an amount to continue.");
-      ui.amount.focus();
-      return;
-    }
-    if (amount < MIN) {
-      showError("The minimum deposit is " + money(MIN) + ".");
-      ui.amount.focus();
-      return;
-    }
-    if (amount > MAX) {
-      showError("The maximum deposit is " + money(MAX) + ".");
-      ui.amount.focus();
-      return;
-    }
-    if (amount <= c.fee) {
-      showError(
-        "The amount must be more than the " + money(c.fee) + " deposit fee."
-      );
-      ui.amount.focus();
-      return;
-    }
-
-    clearError();
-    openDetails(amount);
-  });
-
-  ui.amount.addEventListener("input", clearError);
-
-  /* ---- 5. Step 2 — details dialog + confirmations ------------------------ */
-
-  function openDetails(amount) {
-    var c = currency();
-    var key = state.currencyKey;
-    var crypto = amount / c.rate;
-    var credited = amount - c.fee;
-
-    ui.dCrypto.textContent = coinText(crypto, key);
-    ui.dDate.textContent = dateTime(new Date());
-    ui.dAddress.textContent = c.address;
-
-    ui.dCredit.textContent =
-      c.fee > 0
-        ? "Credited when deposit is successful: " +
-          money(credited) +
-          " (" +
-          money(c.fee) +
-          " fee deducted)."
-        : "Credited when the deposit is successful: " + money(credited) + ".";
-
-    // coin badge in the dialog title
-    var option = ui.currencyList.querySelector('[data-value="' + key + '"]');
-    var badge = option && option.querySelector(".coin");
-    if (badge) {
-      ui.dCoin.setAttribute("data-coin", badge.dataset.coin);
-      ui.dCoin.innerHTML = badge.innerHTML;
-    }
-
-    // show only this currency's QR
-    ui.dQr.querySelectorAll("[data-qr]").forEach(function (node) {
-      node.hidden = node.dataset.qr !== key;
-    });
-
-    // non-blocking format check on the receiving address
-    var ok = c.pattern.test(c.address);
-    ui.verifyBox.hidden = ok;
-    if (!ok) ui.verifyText.textContent = c.formatHint;
-
-    ui.dCredit.classList.remove("is-error");
-
-    // reset copy buttons
-    document.querySelectorAll("[data-copy]").forEach(function (btn) {
-      btn.classList.remove("is-copied");
-    });
-
-    // nothing is filed yet: the details step is a preview the visitor can back
-    // out of, and "Payment done" is what sends it to the admin
-    state.draft = { amount: amount, credited: credited, key: key, requestId: requestKey() };
-    state.sent = false;
-    ui.paymentDone.disabled = false;
-    ui.paymentDone.textContent = "Payment done";
-    ui.backToCreate.disabled = false;
-
-    ui.createDialog.close();
-    ui.detailsDialog.showModal();
+    ui.backToCreate.disabled = !!isBusy;
   }
-
-  /* -- back: return to the currency/amount step without filing anything -- */
-
-  ui.backToCreate.addEventListener("click", function () {
-    if (state.sent) return;
-    ui.detailsDialog.close();
-
-    // keep what was typed so only the address (currency) has to change
-    if (state.draft) ui.amount.value = String(state.draft.amount);
-    syncFeeNote();
-    clearError();
-    ui.createDialog.showModal();
-    ui.amount.focus();
-  });
-
-  /* -- Payment done: this is what reaches the admin --------------------- */
-
-  ui.paymentDone.addEventListener("click", function () {
-    if (!state.draft || state.sent) return;
-
-    var draft = state.draft;
-    var c = CURRENCIES[draft.key];
-
-    state.sent = true;
-    ui.paymentDone.disabled = true;
-    ui.paymentDone.textContent = "Sending…";
-    ui.backToCreate.disabled = true;
-
-    submitPayment(draft, c, ui.dDate.textContent);
-  });
-
-  /* -- closing (footer Close or the ✕) only closes: nothing is filed ----- */
 
   function resetDraft() {
     state.draft = null;
     state.sent = false;
-    ui.paymentDone.disabled = false;
-    ui.paymentDone.textContent = "Payment done";
-    ui.backToCreate.disabled = false;
+    state.quote = null;
+    state.quoteLoading = false;
+
+    setBusy(false, "Payment done");
   }
 
-  document.querySelectorAll("#detailsDialog [data-close-dialog]").forEach(function (btn) {
-    btn.addEventListener("click", function (event) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!state.sent) resetDraft();
-      ui.detailsDialog.close();
-      ui.dCredit.textContent = "";
-      ui.amount.value = "";
-    });
-  });
-
-  /* ---- 6. Copy buttons --------------------------------------------------- */
-
-  function copyText(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text);
-    }
-    return new Promise(function (resolve, reject) {
-      var helper = document.createElement("textarea");
-      helper.value = text;
-      helper.setAttribute("readonly", "");
-      helper.style.position = "absolute";
-      helper.style.left = "-9999px";
-      document.body.appendChild(helper);
-      helper.select();
-      var ok = false;
-      try {
-        ok = document.execCommand("copy");
-      } catch (err) {
-        ok = false;
+  function closeFlow() {
+    try {
+      if (ui.detailsDialog.open) {
+        ui.detailsDialog.close();
       }
-      document.body.removeChild(helper);
-      ok ? resolve() : reject();
-    });
+    } catch (error) {}
+
+    try {
+      if (ui.createDialog.open) {
+        ui.createDialog.close();
+      }
+    } catch (error) {}
+
+    ui.dCredit.textContent = "";
+    ui.amount.value = "";
+
+    resetDraft();
   }
 
-  document.querySelectorAll("[data-copy]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var target = document.getElementById(btn.dataset.copy);
-      if (!target) return;
+  function paymentFailed(message, quoteFailure) {
+    ui.dCredit.classList.add("is-error");
+    ui.dCredit.textContent = message;
 
-      copyText(target.textContent).then(
-        function () {
-          btn.classList.add("is-copied");
-          window.setTimeout(function () {
-            btn.classList.remove("is-copied");
-          }, 1600);
-        },
-        function () {
-          // clipboard blocked: select the text so it can be copied by hand
-          var range = document.createRange();
-          range.selectNodeContents(target);
-          var selection = window.getSelection();
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
+    state.sent = false;
+
+    if (quoteFailure) {
+      ui.paymentDone.disabled = true;
+      ui.paymentDone.textContent = "Quote unavailable";
+      ui.backToCreate.disabled = false;
+    } else {
+      // Keep the same payment ID so the customer can safely retry.
+      setBusy(false, "Retry report");
+    }
+  }
+
+  function reasonFor(status, message) {
+    if (status === 401) {
+      return "Your session ended. Sign in again to deposit.";
+    }
+
+    if (status === 429) {
+      return message ||
+        "Too many deposit requests. Wait a few minutes.";
+    }
+
+    if (status >= 500) {
+      return "The server is temporarily unavailable. Please try again.";
+    }
+
+    return message ||
+      ("The server refused this request (HTTP " + status + ").");
+  }
+
+  /* ------------------------------------------------------------------------
+     6. OPEN DEPOSIT DETAILS AND CREATE SERVER QUOTE
+     ------------------------------------------------------------------------ */
+
+  function openDetails(amount) {
+    var c = currency();
+    var key = state.currencyKey;
+
+    var draft = {
+      amount: amount,
+      credited: amount,
+      key: key,
+      requestId: requestKey(),
+      paymentId: null,
+      quoteExpiresAt: null
+    };
+
+    state.draft = draft;
+    state.sent = false;
+    state.quote = null;
+    state.quoteLoading = true;
+
+    ui.dCrypto.textContent = "Getting live quote…";
+    ui.dDate.textContent = dateTime(new Date());
+    ui.dAddress.textContent = c.address;
+
+    ui.dCredit.textContent =
+      "Calculating your exact payment amount…";
+
+    ui.dCredit.classList.remove("is-error");
+
+    var option = ui.currencyList.querySelector(
+      '[data-value="' + key + '"]'
+    );
+
+    var badge = option && option.querySelector(".coin");
+
+    if (badge && ui.dCoin) {
+      ui.dCoin.setAttribute(
+        "data-coin",
+        badge.dataset.coin
       );
+
+      ui.dCoin.innerHTML = badge.innerHTML;
+    }
+
+    ui.dQr.querySelectorAll("[data-qr]").forEach(function (node) {
+      node.hidden = node.dataset.qr !== key;
     });
-  });
 
-  /* ---- 7. Submitting the deposit ----------------------------------------- */
+    var addressLooksValid = c.pattern.test(c.address);
 
-  // One key per draft: if the connection drops and the visitor retries, the
-  // server recognises the request and hands back the payment it already made
-  // instead of filing a second one.
-  function requestKey() {
-    var uuid =
-      window.crypto && window.crypto.randomUUID
-        ? window.crypto.randomUUID().replace(/-/g, "")
-        : String(Date.now()) + Math.random().toString(36).slice(2);
-    return "dep-" + uuid.slice(0, 40);
+    if (ui.verifyBox) {
+      ui.verifyBox.hidden = addressLooksValid;
+    }
+
+    if (!addressLooksValid && ui.verifyText) {
+      ui.verifyText.textContent = c.formatHint;
+    }
+
+    document.querySelectorAll("[data-copy]").forEach(function (button) {
+      button.classList.remove("is-copied");
+    });
+
+    setBusy(true, "Preparing quote…");
+
+    ui.createDialog.close();
+    ui.detailsDialog.showModal();
+
+    createQuote(draft, c);
   }
 
-  // A deposit is a request: the server records it as pending and an admin
-  // confirms or fails it in the admin console. The wallet is credited by the
-  // server at that point, so nothing is added here.
-  function submitPayment(draft, c, dateText) {
+  function createQuote(draft, c) {
+    if (PREVIEW) {
+      state.quoteLoading = false;
+
+      paymentFailed(
+        "Preview only: live deposit quotes require the Northlight server.",
+        true
+      );
+
+      return;
+    }
+
     fetch("api/payments", {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         amount: draft.credited,
         asset: c.code,
         network: c.network,
-        request_id: draft.requestId,
-      }),
+        request_id: draft.requestId
+      })
     })
       .then(function (response) {
-        return response
-          .json()
+        return response.json()
           .catch(function () {
             return {};
           })
           .then(function (body) {
-            // a 4xx/5xx is not a network problem: it has its own message
-            if (!response.ok) {
-              if (PREVIEW && noBackend(response.status)) {
-                paymentSent(draft, c, null, dateText);
-                return;
-              }
-              paymentFailed(reasonFor(response.status, body && body.error));
+            if (state.draft !== draft) {
               return;
             }
-            paymentSent(draft, c, body, dateText);
+
+            if (!response.ok) {
+              state.quoteLoading = false;
+
+              paymentFailed(
+                reasonFor(
+                  response.status,
+                  body && body.error
+                ),
+                true
+              );
+
+              return;
+            }
+
+            var payment = body && body.payment;
+
+            if (
+              !payment ||
+              !payment.id ||
+              payment.crypto_amount == null ||
+              payment.quote_expires_at == null ||
+              payment.amount == null ||
+              payment.send_amount == null ||
+              payment.network_fee == null
+            ) {
+              state.quoteLoading = false;
+
+              paymentFailed(
+                "The server returned an incomplete quote. Do not send payment. Please try again.",
+                true
+              );
+
+              return;
+            }
+
+            state.quoteLoading = false;
+            state.quote = payment;
+
+            draft.paymentId = payment.id;
+            draft.quoteExpiresAt =
+              Number(payment.quote_expires_at);
+
+            if (
+              !Number.isFinite(draft.quoteExpiresAt) ||
+              draft.quoteExpiresAt <= 0
+            ) {
+              paymentFailed(
+                "The server returned an invalid quote expiry. Do not send payment.",
+                true
+              );
+
+              return;
+            }
+
+            if (
+              draft.quoteExpiresAt * 1000 <= Date.now()
+            ) {
+              paymentFailed(
+                "This quote has already expired. Go back and create a new quote. Do not send using an expired quote.",
+                true
+              );
+
+              return;
+            }
+
+            ui.dCrypto.textContent = coinText(
+              payment.crypto_amount,
+              draft.key
+            );
+
+            ui.dDate.textContent = dateTime(new Date());
+
+            ui.dCredit.textContent =
+              "Wallet credit: " +
+              money(payment.amount) +
+              ". Network fee: " +
+              money(payment.network_fee) +
+              ". Total send value: " +
+              money(payment.send_amount) +
+              ". Quote expires: " +
+              dateTime(
+                new Date(draft.quoteExpiresAt * 1000)
+              ) +
+              ".";
+
+            ui.paymentDone.disabled = false;
+            ui.paymentDone.textContent =
+              "I've sent the payment";
+
+            ui.backToCreate.disabled = false;
           });
       })
       .catch(function () {
-        if (PREVIEW) {
-          // a single-file preview cannot hold a connection: demo the flow
-          paymentSent(draft, c, null, dateText);
+        if (state.draft !== draft) {
           return;
         }
+
+        state.quoteLoading = false;
+
         paymentFailed(
-          "We could not reach the server, so this deposit was not sent. " +
-            "Check your connection and press Payment done again."
+          "We couldn't reach the server to create a quote. Check your connection and try again. Do not send crypto without a valid quote.",
+          true
         );
       });
   }
 
-  // Statuses a static host uses when it has no API to route to.
-  function noBackend(status) {
-    return status === 404 || status === 405 || status === 501;
-  }
+  /* ------------------------------------------------------------------------
+     7. CUSTOMER REPORTS PAYMENT SENT
+     ------------------------------------------------------------------------ */
 
-  // Server messages are written for humans — use them as-is.
-  function reasonFor(status, message) {
-    if (status === 405 || status === 501) {
-      return "Deposits are unavailable right now. Please try again later.";
-    }
-    if (status >= 500) {
-      return "Something went wrong on our side, nothing was sent. Try again in a moment.";
-    }
-    if (message) return message;
-    if (status === 401) return "Your session ended. Sign in again to deposit.";
-    if (status === 429) return "That is a lot of deposits at once. Wait a few minutes.";
-    return "The server refused this deposit (HTTP " + status + "). Try again.";
-  }
+  function reportPayment() {
+    var draft = state.draft;
 
-  // The server has the payment: receipt, close the flow, say so on the page.
-  function paymentSent(draft, c, body, dateText) {
-    var id = body && body.payment && body.payment.id;
-    var preview = body === null;
-
-    try {
-      var row = addHistoryRow({
-        date: dateText,
-        label: c.code + " · " + c.network,
-        amount: draft.amount,
-        status: "pending",
-        confirmations: 0,
-      });
-      paintPending(row);
-      flashRow(row);
-    } catch (err) {
-      // the receipt row is a nicety; the payment itself is already filed
-    }
-
-    state.pending += 1;
-    closeFlow();
-    setTimeout(loadHistory, 400); // the row that is now on the server
-
-    if (preview) {
-      announce(
-        "Preview only — this deposit was not sent anywhere. Serve the site "
-          + "with server/app.py and it will land in the admin console.",
-        true
-      );
+    if (!draft || state.sent) {
       return;
     }
 
-    announce(
-      "Payment details submitted. Deposit is awaiting verification."
-    );
+    if (!draft.paymentId) {
+      paymentFailed(
+        "There is no valid server payment record. Go back and create a new quote.",
+        true
+      );
+
+      return;
+    }
+
+    state.sent = true;
+
+    setBusy(true, "Submitting report…");
+
+    fetch("api/payment-sent", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: draft.paymentId
+      })
+    })
+      .then(function (response) {
+        return response.json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (body) {
+            if (state.draft !== draft) {
+              return;
+            }
+
+            if (!response.ok) {
+              paymentFailed(
+                reasonFor(
+                  response.status,
+                  body && body.error
+                ),
+                false
+              );
+
+              return;
+            }
+
+            closeFlow();
+
+            window.setTimeout(loadHistory, 400);
+
+            announce(
+              "Your payment report was submitted. Your deposit is awaiting admin verification."
+            );
+          });
+      })
+      .catch(function () {
+        if (state.draft !== draft) {
+          return;
+        }
+
+        paymentFailed(
+          "We couldn't confirm whether your report reached the server. You can retry safely using the same payment record.",
+          false
+        );
+      });
   }
 
-  // Nothing was filed: keep the dialog open and explain why.
-  function paymentFailed(message) {
-    ui.dCredit.classList.add("is-error");
-    state.sent = false;
-    ui.paymentDone.disabled = false;
-    ui.paymentDone.textContent = "Payment done";
-    ui.backToCreate.disabled = false;
-    ui.dCredit.textContent = message;
-  }
+  /* ------------------------------------------------------------------------
+     8. DEPOSIT HISTORY
+     ------------------------------------------------------------------------ */
 
-  // Kept for clarity: every key is generated once per draft, so pressing
-  // "Payment done" again after a failure reuses it (no duplicate payment).
-
-  function closeFlow() {
-    try {
-      ui.detailsDialog.close();
-    } catch (err) {}
-    try {
-      if (ui.createDialog.open) ui.createDialog.close();
-    } catch (err) {}
-    ui.dCredit.textContent = "";
-    ui.amount.value = "";
-    resetDraft();
-  }
-
-  function paintPending(row) {
-    var badge = row.querySelector(".status");
-    if (!badge) return;
-    badge.className = "status status--pending";
-    badge.textContent = "Pending review";
-  }
-
-  function flashRow(row) {
-    if (!row || typeof row.animate !== "function") return;
-    row.animate(
-      [
-        { backgroundColor: "rgba(183, 118, 12, 0.14)" },
-        { backgroundColor: "transparent" },
-      ],
-      { duration: 900, easing: "ease-out" }
-    );
-  }
-
-  // Short-lived note shown on the page after the flow closes.
-  var announceTimer = null;
-  function announce(text, preview) {
-    var note = document.getElementById("depositNote");
-    if (!note) return;
-    note.classList.toggle("deposit-note--preview", !!preview);
-    note.textContent = text;
-    note.hidden = false;
-    if (announceTimer) clearTimeout(announceTimer);
-    announceTimer = setTimeout(function () {
-      note.hidden = true;
-      note.textContent = "";
-    }, 9000);
-  }
-
-  /* ---- 8. History -------------------------------------------------------- */
-
-  
   function addHistoryRow(entry) {
     var tr = document.createElement("tr");
 
-    var date = document.createElement("td");
-    date.textContent = entry.date;
+    var dateCell = document.createElement("td");
+    dateCell.textContent = entry.date;
 
     var currencyCell = document.createElement("td");
     currencyCell.textContent = entry.label;
 
-    var amount = document.createElement("td");
-    amount.textContent = money(entry.amount);
+    var amountCell = document.createElement("td");
+    amountCell.textContent = money(entry.amount);
 
-    var status = document.createElement("td");
+    var statusCell = document.createElement("td");
     var badge = document.createElement("span");
-    badge.className =
-      entry.status === "completed" ? "status status--ok" : "status status--pending";
-    badge.textContent =
+
+    if (
+      entry.status === "confirmed" ||
       entry.status === "completed"
-        ? "Completed"
-        : entry.status === "failed"
-          ? "Failed — Contact support"
-          : "Pending review";
+    ) {
+      badge.className = "status status--ok";
+      badge.textContent = "Completed";
+    } else if (entry.status === "failed") {
+      badge.className = "status status--failed";
+      badge.textContent = "Failed — Contact support";
+    } else if (entry.status === "awaiting_payment") {
+      badge.className = "status status--pending";
+      badge.textContent = "Awaiting payment";
+    } else {
+      badge.className = "status status--pending";
+      badge.textContent = "Pending review";
+    }
 
-    status.appendChild(badge);
+    statusCell.appendChild(badge);
 
-    tr.appendChild(date);
+    tr.appendChild(dateCell);
     tr.appendChild(currencyCell);
-    tr.appendChild(amount);
-    tr.appendChild(status);
+    tr.appendChild(amountCell);
+    tr.appendChild(statusCell);
 
     ui.historyBody.appendChild(tr);
+
     return tr;
   }
 
-  // The list is the visitor's own history from the server — no sample rows.
   function loadHistory() {
-    if (PREVIEW) return; // a single file has no server to ask
+    if (PREVIEW) {
+      return;
+    }
 
-    fetch("api/payments", { credentials: "same-origin" })
+    fetch("api/payments", {
+      credentials: "same-origin"
+    })
       .then(function (response) {
-        return response.ok ? response.json() : null;
+        if (!response.ok) {
+          return null;
+        }
+
+        return response.json();
       })
       .then(function (data) {
-        if (!data || !data.payments) return;
+        if (!data || !Array.isArray(data.payments)) {
+          return;
+        }
+
         ui.historyBody.textContent = "";
 
-        if (!data.payments.length) {
+        if (data.payments.length === 0) {
           var tr = document.createElement("tr");
           var td = document.createElement("td");
+
           td.colSpan = 4;
           td.className = "table-simple__empty";
           td.textContent = "No deposits yet.";
+
           tr.appendChild(td);
           ui.historyBody.appendChild(tr);
+
           return;
         }
 
         data.payments.forEach(function (payment) {
+          var date = parseServerDate(payment.created_at);
+
           addHistoryRow({
-            date: dateTime(new Date(payment.created_at * 1000)),
-            label: payment.asset + " · " + payment.network,
+            date: dateTime(date),
+            label:
+              (payment.asset || "") +
+              " · " +
+              (payment.network || ""),
             amount: payment.amount,
-            status: payment.status === "confirmed"
-              ? "completed"
-              : payment.status === "failed"
-                ? "failed"
-                : "pending",
+            status: payment.status
           });
         });
       })
       .catch(function () {
-        // no server, or signed out: an empty list is the honest answer
+        // Keep existing history visible if the request fails.
       });
   }
 
-  /* ---- 9. Bootstrap ------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+     9. COPY ADDRESS
+     ------------------------------------------------------------------------ */
 
-  var saved = parseFloat(storage.get("nl_balance", "24.00"));
-  setBalance(isFinite(saved) ? saved : 24);
+  function copyText(text) {
+    if (
+      navigator.clipboard &&
+      navigator.clipboard.writeText
+    ) {
+      return navigator.clipboard.writeText(text);
+    }
 
-  selectCurrency(state.currencyKey);
-  closeList();
-  loadHistory();
+    return new Promise(function (resolve, reject) {
+      var helper = document.createElement("textarea");
 
-  // close buttons in both dialogs
-  document.querySelectorAll("[data-close-dialog]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var dialog = btn.closest("dialog");
-      if (dialog) dialog.close();
+      helper.value = text;
+      helper.setAttribute("readonly", "");
+
+      helper.style.position = "absolute";
+      helper.style.left = "-9999px";
+
+      document.body.appendChild(helper);
+
+      helper.select();
+
+      var copied = false;
+
+      try {
+        copied = document.execCommand("copy");
+      } catch (error) {
+        copied = false;
+      }
+
+      document.body.removeChild(helper);
+
+      if (copied) {
+        resolve();
+      } else {
+        reject();
+      }
     });
-  });
+  }
 
-  // Dropdowns (account menu, nav tabs) are handled by menu.js, which every
-  // page with the top bar loads.
+  /* ------------------------------------------------------------------------
+     10. EVENT HANDLERS
+     ------------------------------------------------------------------------ */
+
+  function bindEvents() {
+    ui.openCreate.addEventListener("click", function () {
+      clearError();
+
+      ui.amount.value = "";
+
+      syncFeeNote();
+
+      ui.createDialog.showModal();
+
+      ui.currencyButton.focus();
+    });
+
+    ui.currencyButton.addEventListener("click", function (event) {
+      event.stopPropagation();
+
+      if (ui.currencyList.hidden) {
+        openList();
+      } else {
+        closeList();
+      }
+    });
+
+    ui.currencyButton.addEventListener("keydown", function (event) {
+      if (
+        event.key === "ArrowDown" ||
+        event.key === "Enter" ||
+        event.key === " "
+      ) {
+        event.preventDefault();
+        openList();
+      }
+    });
+
+    ui.currencyList.addEventListener("click", function (event) {
+      var option = event.target.closest("[data-value]");
+
+      if (!option) {
+        return;
+      }
+
+      selectCurrency(option.dataset.value);
+
+      closeList();
+
+      ui.currencyButton.focus();
+    });
+
+    ui.currencyList.addEventListener("keydown", function (event) {
+      var options = currencyOptions();
+
+      var active = options.findIndex(function (option) {
+        return option.classList.contains("is-active");
+      });
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+
+        highlight(
+          Math.min(active + 1, options.length - 1)
+        );
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+
+        highlight(Math.max(active - 1, 0));
+      } else if (
+        event.key === "Enter" ||
+        event.key === " "
+      ) {
+        event.preventDefault();
+
+        if (active >= 0) {
+          selectCurrency(options[active].dataset.value);
+        }
+
+        closeList();
+
+        ui.currencyButton.focus();
+      } else if (event.key === "Escape") {
+        closeList();
+        ui.currencyButton.focus();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (
+        !ui.currencyList.hidden &&
+        !ui.currencyList.contains(event.target) &&
+        !ui.currencyButton.contains(event.target)
+      ) {
+        closeList();
+      }
+    });
+
+    ui.createDeposit.addEventListener("click", function () {
+      var amount = Number(ui.amount.value);
+      var fee = currency().fee;
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        showError("Enter an amount to continue.");
+      } else if (amount < MIN) {
+        showError(
+          "The minimum deposit is " + money(MIN) + "."
+        );
+      } else if (amount > MAX) {
+        showError(
+          "The maximum deposit is " + money(MAX) + "."
+        );
+      } else if (amount <= fee) {
+        showError(
+          "The amount must be more than the " +
+          money(fee) +
+          " network fee."
+        );
+      } else {
+        clearError();
+        openDetails(amount);
+      }
+    });
+
+    ui.amount.addEventListener("input", clearError);
+
+    ui.backToCreate.addEventListener("click", function () {
+      if (state.sent) {
+        return;
+      }
+
+      var previousAmount = state.draft
+        ? state.draft.amount
+        : "";
+
+      if (ui.detailsDialog.open) {
+        ui.detailsDialog.close();
+      }
+
+      resetDraft();
+
+      ui.amount.value = String(previousAmount);
+
+      syncFeeNote();
+      clearError();
+
+      ui.createDialog.showModal();
+
+      ui.amount.focus();
+    });
+
+    ui.paymentDone.addEventListener(
+      "click",
+      reportPayment
+    );
+
+    document
+      .querySelectorAll("#detailsDialog [data-close-dialog]")
+      .forEach(function (button) {
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (state.sent) {
+            return;
+          }
+
+          if (ui.detailsDialog.open) {
+            ui.detailsDialog.close();
+          }
+
+          resetDraft();
+
+          ui.dCredit.textContent = "";
+          ui.amount.value = "";
+        });
+      });
+
+    document.querySelectorAll("[data-copy]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var target = document.getElementById(
+          button.dataset.copy
+        );
+
+        if (!target) {
+          return;
+        }
+
+        copyText(target.textContent)
+          .then(function () {
+            button.classList.add("is-copied");
+
+            window.setTimeout(function () {
+              button.classList.remove("is-copied");
+            }, 1600);
+          })
+          .catch(function () {
+            var range = document.createRange();
+
+            range.selectNodeContents(target);
+
+            var selection = window.getSelection();
+
+            selection.removeAllRanges();
+            selection.addRange(range);
+          });
+      });
+    });
+
+    document.querySelectorAll("[data-close-dialog]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var dialog = button.closest("dialog");
+
+        if (
+          dialog &&
+          dialog.id !== "detailsDialog"
+        ) {
+          dialog.close();
+        }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     11. START
+     ------------------------------------------------------------------------ */
+
+  function bootstrap() {
+    if (!requireElements()) {
+      return;
+    }
+
+    bindEvents();
+
+    selectCurrency(state.currencyKey);
+
+    closeList();
+
+    loadHistory();
+  }
+
+  bootstrap();
 
 })();
