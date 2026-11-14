@@ -305,20 +305,46 @@
         </a>
 
         <a class="tab" href="search.html">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+      <div class="menu" data-menu>
+          <button
+            class="tab"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="goodsMenu"
           >
-            <rect x="2" y="5" width="20" height="14" rx="2" />
-            <path d="M2 10h20" />
-          </svg>
-          cards
-        </a>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+            </svg>
+            Goods
+            <svg
+              class="tab__chev"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="m7 10 5 5 5-5z" />
+            </svg>
+          </button>
+
+          <div class="menu__panel" id="goodsMenu" hidden>
+            <a class="menu__item" href="search.html">
+              Cheap Products
+            </a>
+            <a class="menu__item" href="expensive.html">
+              Expensive Products
+            </a>
+          </div>
+      </div>
 
         <a class="tab" href="bundles.html">
           <svg
