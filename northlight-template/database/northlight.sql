@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS `expensive_products` (
     `formats`      VARCHAR(255) NOT NULL,
     `license`      VARCHAR(190) NOT NULL,
     `refund_period` VARCHAR(64) NOT NULL,
+    `country_code` CHAR(2) NULL,
     `price_cents`  BIGINT NOT NULL,
     `blurb`        TEXT NOT NULL,
     `created_at`   BIGINT NOT NULL,

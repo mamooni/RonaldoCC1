@@ -1631,26 +1631,7 @@
     "sol-y-mar": "ES",
   };
 
-  var COUNTRY_NAME = {
-    US: "United States",
-    GB: "United Kingdom",
-    NL: "Netherlands",
-    GH: "Ghana",
-    NG: "Nigeria",
-    KW: "Kuwait",
-    DE: "Germany",
-    KE: "Kenya",
-    IS: "Iceland",
-    JP: "Japan",
-    KR: "South Korea",
-    CA: "Canada",
-    AU: "Australia",
-    BR: "Brazil",
-    IN: "India",
-    ZA: "South Africa",
-    AE: "United Arab Emirates",
-    ES: "Spain",
-  };
+  var COUNTRY_NAME = window.NL_COUNTRY_NAME || {};
 
   // Drops grouped by the day they were added, newest day first.
   var DAY_GROUPS = (function () {

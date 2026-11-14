@@ -14,6 +14,24 @@
 
   const MAX_PRODUCTS = 5;
 
+  function populateCountrySelect(select) {
+    const countries = window.NL_COUNTRIES || [];
+
+    select.replaceChildren();
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a country";
+    select.appendChild(placeholder);
+
+    countries.forEach(function (country) {
+      const option = document.createElement("option");
+      option.value = country.code;
+      option.textContent = country.name;
+      select.appendChild(option);
+    });
+  }
+
   function showNote(message, isError) {
     note.hidden = false;
     note.textContent = message;
@@ -60,8 +78,24 @@
       wrapper.appendChild(label);
     });
 
+    const countryLabel = document.createElement("label");
+    countryLabel.appendChild(
+      document.createTextNode("Intended country")
+    );
+
+    const countrySelect = document.createElement("select");
+    countrySelect.name = "country_code";
+    countrySelect.required = true;
+
+    populateCountrySelect(countrySelect);
+
+    countryLabel.appendChild(countrySelect);
+    wrapper.appendChild(countryLabel);
+
     const descriptionLabel = document.createElement("label");
-    descriptionLabel.appendChild(document.createTextNode("Description"));
+    descriptionLabel.appendChild(
+      document.createTextNode("Description")
+    );
 
     const description = document.createElement("textarea");
     description.name = "blurb";
@@ -76,21 +110,16 @@
   }
 
   function updateSlotControls() {
-    const count = fields.querySelectorAll(".admin__product-form").length;
+    const count = fields.querySelectorAll(
+      ".admin__product-form"
+    ).length;
+
     addButton.disabled = count >= MAX_PRODUCTS;
+
     addButton.textContent = count >= MAX_PRODUCTS
       ? "Maximum of five products"
       : "Add another product";
   }
-
-  addButton.addEventListener("click", function () {
-    const count = fields.querySelectorAll(".admin__product-form").length;
-
-    if (count >= MAX_PRODUCTS) return;
-
-    fields.appendChild(productSlot(count + 1));
-    updateSlotControls();
-  });
 
   function addCell(row, value) {
     const cell = document.createElement("td");
@@ -104,12 +133,16 @@
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Could not load products.");
+        throw new Error(
+          data.error || "Could not load products."
+        );
       }
 
       tableBody.replaceChildren();
 
-      const products = Array.isArray(data.products) ? data.products : [];
+      const products = Array.isArray(data.products)
+        ? data.products
+        : [];
 
       products.forEach(function (product, index) {
         const row = document.createElement("tr");
@@ -120,10 +153,17 @@
         addCell(row, product.category);
 
         const price = Number(product.price);
-        addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—");
+        addCell(
+          row,
+          Number.isFinite(price)
+            ? "$" + price.toFixed(2)
+            : "—"
+        );
 
         const added = product.created_at
-          ? new Date(Number(product.created_at) * 1000).toLocaleString()
+          ? new Date(
+              Number(product.created_at) * 1000
+            ).toLocaleString()
           : "—";
 
         addCell(row, added);
@@ -132,10 +172,23 @@
 
       emptyMessage.hidden = products.length !== 0;
     } catch (error) {
-      showNote(error.message || "Could not load existing products.", true);
+      showNote(
+        error.message || "Could not load existing products.",
+        true
+      );
     }
-    
   }
+
+  addButton.addEventListener("click", function () {
+    const count = fields.querySelectorAll(
+      ".admin__product-form"
+    ).length;
+
+    if (count >= MAX_PRODUCTS) return;
+
+    fields.appendChild(productSlot(count + 1));
+    updateSlotControls();
+  });
 
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
@@ -145,26 +198,29 @@
     );
 
     const products = slots.map(function (slot) {
-    const product = {};
+      const product = {};
 
-    slot.querySelectorAll("[name]").forEach(function (field) {
+      slot.querySelectorAll("[name]").forEach(function (field) {
         product[field.name] = field.value.trim();
-    });
+      });
 
-    return product;
+      return product;
     });
 
     saveButton.disabled = true;
     showNote("Saving products…", false);
 
     try {
-      const response = await fetch("api/admin/expensive-products", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ products: products })
-      });
+      const response = await fetch(
+        "api/admin/expensive-products",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ products: products })
+        }
+      );
 
       const data = await response.json();
 
@@ -173,7 +229,9 @@
           ? " " + data.details.join(" ")
           : "";
 
-        throw new Error((data.error || "Could not save products.") + details);
+        throw new Error(
+          (data.error || "Could not save products.") + details
+        );
       }
 
       form.reset();
@@ -187,11 +245,19 @@
 
       await loadProducts();
     } catch (error) {
-      showNote(error.message || "Something went wrong.", true);
+      showNote(
+        error.message || "Something went wrong.",
+        true
+      );
     } finally {
       saveButton.disabled = false;
     }
   });
+
+  // Populate the country dropdown in the original HTML form.
+  fields.querySelectorAll(
+    'select[name="country_code"]'
+  ).forEach(populateCountrySelect);
 
   updateSlotControls();
   loadProducts();
