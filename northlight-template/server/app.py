@@ -1472,6 +1472,7 @@ POST_ROUTES = {
     "/api/reset-password": "api_reset_password",
     "/api/payments": "api_create_payment",
     "/api/payment-sent": "api_report_payment",
+    "/api/payment-cancel": "api_cancel_payment",
     "/api/purchase": "api_purchase",
     "/api/admin/payment": "api_admin_payment",
 }
@@ -2350,12 +2351,13 @@ class Handler(BaseHTTPRequestHandler):
                     "pending": 0,
                     "confirmed": 0,
                     "failed": 0,
+                    "cancelled": 0,
                 },
             )
-
+            tally[pay["status"]] = tally.get(pay["status"], 0) + 1
         for user in users:
             user["payments"] = per_user.get(
-                user["id"], {"pending": 0, "confirmed": 0, "failed": 0, "awaiting_payment": 0}
+                user["id"], {"pending": 0, "confirmed": 0, "failed": 0, "awaiting_payment": 0, "cancelled": 0,}
             )
             user["paid"] = user["payments"]["confirmed"] > 0
 
@@ -2368,6 +2370,7 @@ class Handler(BaseHTTPRequestHandler):
             "pending": len([p for p in payments if p["status"] == "pending"]),
             "confirmed": len(confirmed),
             "failed": len([p for p in payments if p["status"] == "failed"]),
+            "cancelled": len([p for p in payments if p["status"] == "cancelled"]),
             "revenue": dollars(sum(int(round(p["amount"] * 100)) for p in confirmed)),
         }
 
@@ -2738,6 +2741,80 @@ class Handler(BaseHTTPRequestHandler):
                 }
             },
         )
+
+
+    
+    def api_cancel_payment(self, payload):
+        """Cancel a customer's deposit that is still awaiting payment."""
+        user = self._current_user()
+        if user is None:
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
+        if payment_throttle.hit(user["id"]):
+            return self._error(429, "Too many payment requests. Please wait.")
+
+        try:
+            payment_id = int(payload.get("id"))
+            if payment_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid payment ID."})
+
+        with db(write=True) as conn:
+            payment = conn.execute(
+                "SELECT id, status FROM payments "
+                "WHERE id = ? AND user_id = ?",
+                (payment_id, user["id"]),
+            ).fetchone()
+
+            if payment is None:
+                return self._json(404, {"error": "Deposit not found."})
+
+            if payment["status"] == "cancelled":
+                return self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "id": payment_id,
+                        "status": "cancelled",
+                        "already_cancelled": True,
+                    },
+                )
+
+            if payment["status"] != "awaiting_payment":
+                return self._json(
+                    409,
+                    {"error": "Only deposits awaiting payment can be cancelled."},
+                )
+
+            updated = conn.execute(
+                "UPDATE payments SET status = 'cancelled' "
+                "WHERE id = ? AND user_id = ? "
+                "AND status = 'awaiting_payment'",
+                (payment_id, user["id"]),
+            )
+
+            if updated.rowcount != 1:
+                return self._json(
+                    409, {"error": "This deposit has already changed."}
+                )
+
+            audit(
+                conn,
+                "payment.cancelled",
+                actor=user,
+                target=payment_id,
+                detail="Customer cancelled deposit before reporting payment.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200,
+            {"ok": True, "id": payment_id, "status": "cancelled"},
+        )
+
 
     def api_report_payment(self, payload):
         """Move the customer's own deposit into the admin verification queue."""

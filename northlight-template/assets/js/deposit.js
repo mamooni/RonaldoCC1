@@ -121,6 +121,7 @@
 
     backToCreate: $("backToCreate"),
     paymentDone: $("paymentDone"),
+    cancelDeposit: $("cancelDeposit"),
 
     verifyBox: $("verifyBox"),
     verifyText: $("verifyText"),
@@ -419,6 +420,7 @@
 
   function setBusy(isBusy, label) {
     ui.paymentDone.disabled = !!isBusy;
+    ui.cancelDeposit.disabled = !!isBusy;
 
     ui.paymentDone.textContent =
       label ||
@@ -684,6 +686,7 @@
               ".";
 
             ui.paymentDone.disabled = false;
+            ui.cancelDeposit.disabled = false;
             ui.paymentDone.textContent =
               "I've sent the payment";
 
@@ -781,53 +784,128 @@
       });
   }
 
+  function cancelDeposit() {
+  var draft = state.draft;
+
+  if (!draft || !draft.paymentId || state.sent) {
+    announce("This deposit cannot be cancelled.");
+    return;
+  }
+
+  if (
+    !window.confirm(
+      "Cancel this deposit? Only cancel if you have NOT sent any cryptocurrency."
+    )
+  ) {
+    return;
+  }
+
+  setBusy(true, "Cancelling deposit…");
+
+  fetch("api/payment-cancel", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      id: draft.paymentId
+    })
+  })
+    .then(function (response) {
+      return response.json()
+        .catch(function () {
+          return {};
+        })
+        .then(function (body) {
+          if (state.draft !== draft) {
+            return;
+          }
+
+          if (!response.ok) {
+            setBusy(false, "Payment done");
+
+            announce(
+              body && body.error
+                ? body.error
+                : "We couldn't cancel this deposit. Please try again."
+            );
+
+            return;
+          }
+
+          closeFlow();
+
+          window.setTimeout(loadHistory, 400);
+
+          announce("Your deposit has been cancelled.");
+        });
+    })
+    .catch(function () {
+      if (state.draft !== draft) {
+        return;
+      }
+
+      setBusy(false, "Payment done");
+
+      announce(
+        "We couldn't confirm the cancellation. Check your deposit history before trying again."
+      );
+    });
+}
+
   /* ------------------------------------------------------------------------
      8. DEPOSIT HISTORY
      ------------------------------------------------------------------------ */
 
-  function addHistoryRow(entry) {
-    var tr = document.createElement("tr");
+ 
+function addHistoryRow(entry) {
+  var tr = document.createElement("tr");
 
-    var dateCell = document.createElement("td");
-    dateCell.textContent = entry.date;
+  var dateCell = document.createElement("td");
+  dateCell.textContent = entry.date;
 
-    var currencyCell = document.createElement("td");
-    currencyCell.textContent = entry.label;
+  var currencyCell = document.createElement("td");
+  currencyCell.textContent = entry.label;
 
-    var amountCell = document.createElement("td");
-    amountCell.textContent = money(entry.amount);
+  var amountCell = document.createElement("td");
+  amountCell.textContent = money(entry.amount);
 
-    var statusCell = document.createElement("td");
-    var badge = document.createElement("span");
+  var statusCell = document.createElement("td");
+  var badge = document.createElement("span");
 
-    if (
-      entry.status === "confirmed" ||
-      entry.status === "completed"
-    ) {
-      badge.className = "status status--ok";
-      badge.textContent = "Completed";
-    } else if (entry.status === "failed") {
-      badge.className = "status status--failed";
-      badge.textContent = "Failed — Contact support";
-    } else if (entry.status === "awaiting_payment") {
-      badge.className = "status status--pending";
-      badge.textContent = "Awaiting payment";
-    } else {
-      badge.className = "status status--pending";
-      badge.textContent = "Pending review";
-    }
-
-    statusCell.appendChild(badge);
-
-    tr.appendChild(dateCell);
-    tr.appendChild(currencyCell);
-    tr.appendChild(amountCell);
-    tr.appendChild(statusCell);
-
-    ui.historyBody.appendChild(tr);
-
-    return tr;
+  if (
+    entry.status === "confirmed" ||
+    entry.status === "completed"
+  ) {
+    badge.className = "status status--ok";
+    badge.textContent = "Completed";
+  } else if (entry.status === "failed") {
+    badge.className = "status status--failed";
+    badge.textContent = "Failed — Contact support";
+  } else if (entry.status === "cancelled") {
+    badge.className = "status status--failed";
+    badge.textContent = "Cancelled";
+  } else if (entry.status === "awaiting_payment") {
+    badge.className = "status status--pending";
+    badge.textContent = "Awaiting payment";
+  } else {
+    badge.className = "status status--pending";
+    badge.textContent = "Pending review";
   }
+
+  statusCell.appendChild(badge);
+
+  tr.appendChild(dateCell);
+  tr.appendChild(currencyCell);
+  tr.appendChild(amountCell);
+  tr.appendChild(statusCell);
+
+  ui.historyBody.appendChild(tr);
+
+  return tr;
+}
+
 
   function loadHistory() {
     if (PREVIEW) {
@@ -1082,6 +1160,7 @@
       "click",
       reportPayment
     );
+    ui.cancelDeposit.addEventListener("click", cancelDeposit);
 
     document
       .querySelectorAll("#detailsDialog [data-close-dialog]")

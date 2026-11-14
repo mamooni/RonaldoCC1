@@ -2188,6 +2188,17 @@ button.menu__item {
   justify-content: space-between;
 }
 
+@media (max-width: 520px) {
+  .dialog__footer--split {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .dialog__footer--split button {
+    flex: 1 1 auto;
+  }
+}
+
 .btn--create {
   padding: 11px 36px;
   font-size: 13px;
