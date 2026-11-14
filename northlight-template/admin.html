@@ -273,11 +273,91 @@
           </table>
         </div>
       </section>
+
+      <section class="admin__block" id="expensiveProductsAdmin">
+        <h2 class="admin__section">Expensive products</h2>
+        <p class="admin__sub">
+          Add up to five legitimate digital products in one submission.
+        </p>
+
+        <p class="admin__note" id="productsAdminNote" role="status" hidden></p>
+
+        <form id="expensiveProductForm">
+          <div id="expensiveProductFields">
+            <div class="admin__product-form">
+              <h3>Product 1</h3>
+
+              <label>Title
+                <input name="title" maxlength="190" required />
+              </label>
+
+              <label>Creator
+                <input name="creator" maxlength="100" required />
+              </label>
+
+              <label>Category
+                <input name="category" maxlength="100" placeholder="Interface kit" required />
+              </label>
+
+              <label>Formats
+                <input name="formats" maxlength="255" placeholder="Figma, Sketch, SVG" required />
+              </label>
+
+              <label>Licence
+                <input name="license" maxlength="190" placeholder="Single team licence" required />
+              </label>
+
+              <label>Refund period
+                <input name="refund_period" maxlength="64" placeholder="14 days" required />
+              </label>
+
+              <label>Price (USD)
+                <input name="price" type="number" min="0.01" max="1000000" step="0.01" required />
+              </label>
+
+              <label>Description
+                <textarea name="blurb" maxlength="4000" rows="3" required></textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="admin__tools">
+            <button class="admin__refresh" type="button" id="addProductSlot">
+              Add another product
+            </button>
+            <button class="admin__refresh" type="submit" id="saveExpensiveProducts">
+              Save products
+            </button>
+          </div>
+        </form>
+
+        <h3 class="admin__section">Existing products</h3>
+        <div class="admin__scroll">
+          <table class="atable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Creator</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Added</th>
+              </tr>
+            </thead>
+            <tbody id="expensiveProductsBody"></tbody>
+          </table>
+        </div>
+        <p class="admin__empty" id="expensiveProductsEmpty" hidden>
+          No expensive products have been added yet.
+        </p>
+      </section>
+
     </main>
 
     <script src="assets/js/menu.js" defer></script>
     <script src="assets/js/cart.js" defer></script>
     <script src="assets/js/admin.js" defer></script>
+    <script src="assets/js/expensive-products-admin.js" defer></script>
     <script src="assets/js/session.js" defer></script>
   </body>
 </html>

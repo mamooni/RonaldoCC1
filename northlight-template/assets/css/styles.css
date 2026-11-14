@@ -5309,3 +5309,166 @@ button.menu__item {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+
+/* Expensive digital products — admin form */
+#expensiveProductsAdmin .admin__product-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border, #303744);
+  border-radius: 12px;
+}
+
+#expensiveProductsAdmin .admin__product-form h3 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+#expensiveProductsAdmin .admin__product-form label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+}
+
+#expensiveProductsAdmin .admin__product-form input,
+#expensiveProductsAdmin .admin__product-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border, #303744);
+  border-radius: 8px;
+  background: var(--surface, #151a22);
+  color: inherit;
+  font: inherit;
+}
+
+#expensiveProductsAdmin .admin__product-form textarea {
+  resize: vertical;
+  grid-column: 1 / -1;
+}
+
+#expensiveProductsAdmin .admin__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 24px;
+}
+
+#expensiveProductsAdmin button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 650px) {
+  #expensiveProductsAdmin .admin__product-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ==========================================================
+   Northlight — Expensive digital products catalogue
+   ========================================================== */
+
+.page--expensive {
+  padding-top: 32px;
+  padding-bottom: 50px;
+}
+
+.expensive-header {
+  margin-bottom: 28px;
+}
+
+.expensive-header h1 {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 4vw, 34px);
+}
+
+.expensive-header p {
+  margin: 0;
+  color: var(--muted, #9ca3af);
+  line-height: 1.6;
+}
+
+.expensive-catalogue {
+  width: 100%;
+}
+
+.expensive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.expensive-card {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--border, #303744);
+  border-radius: 14px;
+  background: var(--surface, #151a22);
+}
+
+.expensive-card__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.expensive-card__creator {
+  margin: 0 0 14px;
+  color: var(--muted, #9ca3af);
+  font-size: 13px;
+}
+
+.expensive-card__category {
+  display: inline-block;
+  margin: 0 0 14px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  background: var(--border, #303744);
+  font-size: 12px;
+}
+
+.expensive-card__description {
+  margin: 0 0 18px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.expensive-card__details {
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #303744);
+}
+
+.expensive-card__details p {
+  margin: 0 0 9px;
+  color: var(--muted, #9ca3af);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.expensive-card__price {
+  margin: 18px 0 8px;
+  font-size: 23px;
+  font-weight: 700;
+}
+
+.expensive-card__date {
+  margin: 0;
+  color: var(--muted, #9ca3af);
+  font-size: 12px;
+}
+
+@media (max-width: 650px) {
+  .expensive-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .expensive-card {
+    padding: 18px;
+  }
+}
+

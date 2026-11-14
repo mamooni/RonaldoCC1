@@ -583,6 +583,23 @@ CREATE TABLE IF NOT EXISTS purchases (
 );
 CREATE INDEX IF NOT EXISTS purchases_user ON purchases(user_id, id);
 """
+EXPENSIVE_PRODUCTS_TABLE = """
+CREATE TABLE IF NOT EXISTS expensive_products (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    title         TEXT NOT NULL,
+    creator       TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    formats       TEXT NOT NULL,
+    license       TEXT NOT NULL,
+    refund_period TEXT NOT NULL,
+    price_cents   INTEGER NOT NULL CHECK (price_cents > 0),
+    blurb         TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS expensive_products_created
+    ON expensive_products(created_at, id);
+"""
 
 # Every privileged or money-moving action lands here, so a deposit can always
 # be traced back to the request that created it and the admin who decided it.
@@ -715,6 +732,7 @@ def _migrate(conn):
 
     conn.executescript(PAYMENTS_TABLE)
     conn.executescript(PURCHASES_TABLE)
+    conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
     conn.executescript(AUDIT_TABLE)
     conn.executescript(PASSWORD_RESETS_TABLE)
 
@@ -783,7 +801,7 @@ def prune_sessions(conn):
     return removed
 
 
-MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "audit", "postcodes", "password_resets")
+MYSQL_TABLES = ("users", "sessions", "payments", "purchases", "expensive_products", "audit", "postcodes", "password_resets")
 
 
 def init_mysql():
@@ -1205,9 +1223,8 @@ def audit(conn, action, actor=None, target=None, detail=None, ip=None):
                 ip,
             ),
         )
-    except sqlite3.Error as error:  # pragma: no cover - defensive
+    except Exception as error:  # pragma: no cover - defensive
         print("  audit write failed:", error)
-
 
 # --------------------------------------------------------------------------
 # Validation
@@ -1475,6 +1492,7 @@ POST_ROUTES = {
     "/api/payment-cancel": "api_cancel_payment",
     "/api/purchase": "api_purchase",
     "/api/admin/payment": "api_admin_payment",
+    "/api/admin/expensive-products": "api_admin_expensive_products",
 }
 
 GET_ROUTES = ("/api/me", "/api/orders", "/api/payments", "/api/admin/data", "/api/postcode", "/api/bundles")
@@ -1747,6 +1765,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_admin_data()
         if path == "/api/bundles":
             return self.api_bundles()
+        if path == "/api/expensive-products":
+            return self.api_expensive_products()    
         if path.startswith("/api/postcode"):
             return self.api_postcode()
         if path.startswith("/api/"):
@@ -2446,6 +2466,118 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         return self._json(200, {"ok": True, "id": payment_id, "status": status})
+    
+    def api_admin_expensive_products(self, payload):
+        """Create up to five legitimate digital products in one atomic batch."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        items = payload.get("products")
+        if not isinstance(items, list) or not 1 <= len(items) <= 5:
+            return self._json(
+                400, {"error": "Submit between one and five products."}
+            )
+
+        fields = {
+            "title": 190,
+            "creator": 100,
+            "category": 100,
+            "formats": 255,
+            "license": 190,
+            "refund_period": 64,
+            "blurb": 4000,
+        }
+
+        cleaned = []
+        errors = []
+
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                errors.append(f"Product {index}: invalid product data.")
+                continue
+
+            product = {}
+
+            for field, max_length in fields.items():
+                value = item.get(field)
+
+                if not isinstance(value, str):
+                    errors.append(f"Product {index}: {field} is required.")
+                    continue
+
+                value = value.strip()
+
+                if not value:
+                    errors.append(f"Product {index}: {field} is required.")
+                elif len(value) > max_length:
+                    errors.append(
+                        f"Product {index}: {field} must be "
+                        f"{max_length} characters or fewer."
+                    )
+                else:
+                    product[field] = value
+
+            cents, price_error = parse_cents(
+                item.get("price"), low=1, high=100000000
+            )
+
+            if price_error:
+                errors.append(f"Product {index}: {price_error}")
+            else:
+                product["price_cents"] = cents
+
+            cleaned.append(product)
+
+        if errors:
+            return self._json(400, {"error": "Some products are invalid.", "details": errors})
+
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            created_ids = []
+
+            for product in cleaned:
+                result = conn.execute(
+                    "INSERT INTO expensive_products "
+                    "(title, creator, category, formats, license, refund_period, "
+                    "price_cents, blurb, created_at, created_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        product["title"],
+                        product["creator"],
+                        product["category"],
+                        product["formats"],
+                        product["license"],
+                        product["refund_period"],
+                        product["price_cents"],
+                        product["blurb"],
+                        now,
+                        admin["id"],
+                    ),
+                )
+                created_ids.append(result.lastrowid)
+
+            audit(
+                conn,
+                "expensive_products.create",
+                actor=admin,
+                target=",".join(str(product_id) for product_id in created_ids),
+                detail=f"Created {len(created_ids)} expensive product(s).",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            201,
+            {"ok": True, "count": len(created_ids), "ids": created_ids},
+        )
+    
 
     def api_my_payments(self):
         """The signed-in visitor's own deposits, newest first."""
@@ -2896,6 +3028,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ids": [], "count": 0})
         ids = catalogue_ids(drops + bundles)[drops:]
         return self._json(200, {"ids": ids, "count": len(ids)})
+
+    def api_expensive_products(self):
+        """Return the public catalogue of legitimate digital products."""
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, title, creator, category, formats, license, "
+                "refund_period, price_cents, blurb, created_at "
+                "FROM expensive_products "
+                "ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+
+        products = []
+        for row in rows:
+            product = dict(row)
+            product["price"] = dollars(product.pop("price_cents"))
+            products.append(product)
+
+        return self._json(200, {"products": products})
 
     def api_orders(self):
         """The signed-in account's purchases, newest first."""

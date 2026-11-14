@@ -1,0 +1,180 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expensive Products — Northlight</title>
+  <meta
+    name="description"
+    content="Browse premium digital products on Northlight."
+  />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+
+<body data-requires-auth>
+
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="topbar__logo" href="index.html" aria-label="Home">
+        <img src="logo.png" alt="Northlight" class="topbar__logo-img" />
+      </a>
+
+      <div class="topbar__center">
+        <a href="index.html" class="topbar__brand">Northlight</a>
+      </div>
+
+      <div class="topbar__right">
+        <div class="menu" data-menu>
+          <button
+            class="avatar"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="accountMenu"
+          >
+            SU
+          </button>
+
+          <div
+            class="menu__panel menu__panel--account menu__panel--right"
+            id="accountMenu"
+            hidden
+          >
+            <div class="acct__head" data-user>
+              <p class="acct__name" id="menuUsername">search.user</p>
+              <p class="acct__email" id="menuEmail">
+                search.user@example.com
+              </p>
+            </div>
+
+            <a class="acct__item" href="settings.html" data-user>
+              <span>My Account</span>
+            </a>
+
+            <a class="acct__item" href="activity.html" data-user>
+              <span>Your Activities</span>
+            </a>
+
+            <a class="acct__item" href="support.html" data-user>
+              <span>Support</span>
+            </a>
+
+            <button
+              class="acct__item"
+              type="button"
+              id="signOutBtn"
+              data-user
+            >
+              <span>Sign out</span>
+            </button>
+
+            <a
+              class="acct__item acct__item--admin"
+              href="admin.html"
+              data-admin
+              hidden
+            >
+              <span>Admin</span>
+            </a>
+
+            <a class="acct__item" href="login.html" data-guest hidden>
+              <span>Sign in</span>
+            </a>
+
+            <a class="acct__item" href="signup.html" data-guest hidden>
+              <span>Create account</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="subnav" aria-label="Sections">
+    <div class="subnav__inner">
+
+      <a class="tab" href="index.html#rules">
+        Rules &amp; Updates
+      </a>
+
+      <div class="menu" data-menu>
+        <button
+          class="tab"
+          type="button"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="goodsMenu"
+        >
+          Goods
+          <svg
+            class="tab__chev"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="m7 10 5 5 5-5z" />
+          </svg>
+        </button>
+
+        <div class="menu__panel" id="goodsMenu" hidden>
+          <a class="menu__item" href="search.html">
+            Cheap Products
+          </a>
+          <a class="menu__item" href="expensive.html">
+            Expensive Products
+          </a>
+        </div>
+      </div>
+
+      <a class="tab" href="bundles.html">
+        Sms Numbers
+      </a>
+
+      <a class="tab" href="messages.html">
+        Messages
+      </a>
+
+      <a class="tab" href="tickets.html">
+        Tickets
+      </a>
+
+    </div>
+  </nav>
+
+  <main class="page page--expensive">
+    <section class="expensive-header">
+      <h1>Expensive Products</h1>
+      <p>
+        Explore premium digital products, creative resources,
+        and licensed digital assets.
+      </p>
+    </section>
+
+    <section
+      class="expensive-catalogue"
+      aria-label="Premium digital products"
+    >
+      <p id="expensiveLoading" role="status">
+        Loading products...
+      </p>
+
+      <p id="expensiveError" role="alert" hidden></p>
+
+      <p id="expensiveEmpty" hidden>
+        No products have been added yet. Please check back later.
+      </p>
+
+      <div
+        class="expensive-grid"
+        id="expensiveProducts"
+      ></div>
+    </section>
+  </main>
+
+  <script src="assets/js/menu.js" defer></script>
+  <script src="assets/js/session.js" defer></script>
+  <script src="assets/js/expensive-products.js" defer></script>
+
+</body>
+</html>

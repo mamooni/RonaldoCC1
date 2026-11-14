@@ -115,6 +115,30 @@ CREATE TABLE IF NOT EXISTS `purchases` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- Expensive products — legitimate digital products catalogue
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `expensive_products` (
+    `id`           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `title`        VARCHAR(190) NOT NULL,
+    `creator`      VARCHAR(100) NOT NULL,
+    `category`     VARCHAR(100) NOT NULL,
+    `formats`      VARCHAR(255) NOT NULL,
+    `license`      VARCHAR(190) NOT NULL,
+    `refund_period` VARCHAR(64) NOT NULL,
+    `price_cents`  BIGINT NOT NULL,
+    `blurb`        TEXT NOT NULL,
+    `created_at`   BIGINT NOT NULL,
+    `created_by`   INT UNSIGNED NULL,
+    PRIMARY KEY (`id`),
+    KEY `expensive_products_created` (`created_at`, `id`),
+    CONSTRAINT `expensive_products_price_positive`
+        CHECK (`price_cents` > 0),
+    CONSTRAINT `expensive_products_admin_fk`
+        FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- Audit trail — who did what, kept for 180 days
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `audit` (
