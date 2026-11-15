@@ -494,6 +494,10 @@ button {
   position: relative;
 }
 
+.menu__panel[hidden] {
+  display: none !important;
+}
+
 .menu__panel {
   position: absolute;
   top: calc(100% + 8px);
