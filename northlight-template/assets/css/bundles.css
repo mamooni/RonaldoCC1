@@ -579,8 +579,8 @@ button.menu__item {
   max-width: 1180px;
   margin: 0 auto;
   padding: 0 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .subnav__inner::-webkit-scrollbar {
