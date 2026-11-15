@@ -1493,6 +1493,8 @@ POST_ROUTES = {
     "/api/purchase": "api_purchase",
     "/api/admin/payment": "api_admin_payment",
     "/api/admin/expensive-products": "api_admin_expensive_products",
+    "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
+    "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
 }
 
 GET_ROUTES = ("/api/me", "/api/orders", "/api/payments", "/api/admin/data", "/api/postcode", "/api/bundles")
@@ -2608,6 +2610,179 @@ class Handler(BaseHTTPRequestHandler):
             {"ok": True, "count": len(created_ids), "ids": created_ids},
         )
 
+    
+    def api_admin_update_expensive_product(self, payload):
+        """Update one existing legitimate digital product."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        try:
+            product_id = int(payload.get("id"))
+            if product_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid product ID."})
+
+        fields = {
+            "title": 190,
+            "creator": 100,
+            "category": 100,
+            "formats": 255,
+            "license": 190,
+            "refund_period": 64,
+            "blurb": 4000,
+        }
+
+        product = {}
+        errors = []
+
+        for field, max_length in fields.items():
+            value = payload.get(field)
+
+            if not isinstance(value, str):
+                errors.append(f"{field} is required.")
+                continue
+
+            value = value.strip()
+
+            if not value:
+                errors.append(f"{field} is required.")
+            elif len(value) > max_length:
+                errors.append(
+                    f"{field} must be {max_length} characters or fewer."
+                )
+            else:
+                product[field] = value
+
+        country_code = payload.get("country_code")
+
+        if not isinstance(country_code, str):
+            errors.append("Intended country is required.")
+        else:
+            country_code = country_code.strip().upper()
+
+            if (
+                len(country_code) != 2
+                or not country_code.isascii()
+                or not country_code.isalpha()
+            ):
+                errors.append("Invalid country code.")
+            else:
+                product["country_code"] = country_code
+
+        cents, price_error = parse_cents(
+            payload.get("price"), low=1, high=100000000
+        )
+
+        if price_error:
+            errors.append(price_error)
+        else:
+            product["price_cents"] = cents
+
+        if errors:
+            return self._json(
+                400,
+                {
+                    "error": "Please correct the product details.",
+                    "details": errors,
+                },
+            )
+
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT id FROM expensive_products WHERE id = ?",
+                (product_id,),
+            ).fetchone()
+
+            if existing is None:
+                return self._json(404, {"error": "Product not found."})
+
+            conn.execute(
+                "UPDATE expensive_products SET "
+                "title = ?, creator = ?, category = ?, formats = ?, "
+                "license = ?, refund_period = ?, country_code = ?, "
+                "price_cents = ?, blurb = ? "
+                "WHERE id = ?",
+                (
+                    product["title"],
+                    product["creator"],
+                    product["category"],
+                    product["formats"],
+                    product["license"],
+                    product["refund_period"],
+                    product["country_code"],
+                    product["price_cents"],
+                    product["blurb"],
+                    product_id,
+                ),
+            )
+
+            audit(
+                conn,
+                "expensive_products.update",
+                actor=admin,
+                target=product_id,
+                detail=f"Updated expensive product #{product_id}.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200, {"ok": True, "id": product_id}
+        )
+
+    
+    def api_admin_delete_expensive_product(self, payload):
+        """Delete one existing legitimate digital product."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        try:
+            product_id = int(payload.get("id"))
+            if product_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid product ID."})
+
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT id, title FROM expensive_products WHERE id = ?",
+                (product_id,),
+            ).fetchone()
+
+            if existing is None:
+                return self._json(404, {"error": "Product not found."})
+
+            conn.execute(
+                "DELETE FROM expensive_products WHERE id = ?",
+                (product_id,),
+            )
+
+            audit(
+                conn,
+                "expensive_products.delete",
+                actor=admin,
+                target=product_id,
+                detail=f"Deleted expensive product #{product_id}: "
+                       f"{existing['title']}.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True, "id": product_id})
+    
 
     def api_my_payments(self):
         """The signed-in visitor's own deposits, newest first."""
