@@ -8,6 +8,15 @@
   const loadingMessage = document.getElementById("expensiveLoading");
   const errorMessage = document.getElementById("expensiveError");
   const emptyMessage = document.getElementById("expensiveEmpty");
+  const pagination = document.getElementById("expensivePagination");
+  const previousPageButton = document.getElementById("previousPage");
+  const nextPageButton = document.getElementById("nextPage");
+  const pageInfo = document.getElementById("pageInfo");
+
+  const PRODUCTS_PER_PAGE = 20;
+
+  let allProducts = [];
+  let currentPage = 1;
 
   function addText(parent, tag, className, value) {
     const element = document.createElement(tag);
@@ -43,13 +52,13 @@
   }
 
   function getCountryName(code) {
-  const countries = window.NL_COUNTRIES || [];
-  const country = countries.find(function (item) {
-    return item.code === code;
-  });
+    const countries = window.NL_COUNTRIES || [];
+    const country = countries.find(function (item) {
+      return item.code === code;
+    });
 
-  return country ? country.name : "Country not specified";
-}
+    return country ? country.name : "Country not specified";
+  }
 
   function createCountryDisplay(code) {
     const countryName = getCountryName(code);
@@ -120,6 +129,32 @@
     return card;
   }
 
+  function renderProducts() {
+    const totalPages = Math.ceil(
+      allProducts.length / PRODUCTS_PER_PAGE
+    );
+
+    const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    const pageProducts = allProducts.slice(
+      startIndex,
+      startIndex + PRODUCTS_PER_PAGE
+    );
+
+    productsContainer.replaceChildren();
+
+    pageProducts.forEach(function (product) {
+      productsContainer.appendChild(createProductCard(product));
+    });
+
+    pagination.hidden = totalPages <= 1;
+
+    pageInfo.textContent =
+      "Page " + currentPage + " of " + totalPages;
+
+    previousPageButton.disabled = currentPage === 1;
+    nextPageButton.disabled = currentPage === totalPages;
+  }
+
   async function loadProducts() {
     loadingMessage.hidden = false;
     errorMessage.hidden = true;
@@ -150,9 +185,9 @@
         return;
       }
 
-      products.forEach(function (product) {
-        productsContainer.appendChild(createProductCard(product));
-      });
+      allProducts = products;
+      currentPage = 1;
+      renderProducts();
 
     } catch (error) {
       loadingMessage.hidden = true;
@@ -161,6 +196,24 @@
       errorMessage.hidden = false;
     }
   }
+
+  previousPageButton.addEventListener("click", function () {
+    if (currentPage > 1) {
+      currentPage--;
+      renderProducts();
+    }
+  });
+
+  nextPageButton.addEventListener("click", function () {
+    const totalPages = Math.ceil(
+      allProducts.length / PRODUCTS_PER_PAGE
+    );
+
+    if (currentPage < totalPages) {
+      currentPage++;
+      renderProducts();
+    }
+  });
 
   loadProducts();
 })();
