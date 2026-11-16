@@ -3486,7 +3486,8 @@ class Handler(BaseHTTPRequestHandler):
         if not re.fullmatch(
             r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
             request_key,
-):
+        ):
+         
         items = payload.get("items")
         if not isinstance(items, list) or not items or len(items) > 50:
             return self._json(400, {"error": "Invalid order items."})
