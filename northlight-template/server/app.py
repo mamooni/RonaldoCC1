@@ -3481,14 +3481,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if purchase_throttle.hit(user["id"]):
             return self._error(429, "Too many purchases. Wait a minute.")
-
+        
         request_key = str(payload.get("request_key") or "").strip()
         if not re.fullmatch(
             r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
             request_key,
         ):
-         
+            return self._json(400, {"error": "Invalid request key."})
+
         items = payload.get("items")
+
+        
         if not isinstance(items, list) or not items or len(items) > 50:
             return self._json(400, {"error": "Invalid order items."})
 
