@@ -94,40 +94,83 @@
     return countryRow;
   }
 
-  function createProductCard(product) {
-    const card = document.createElement("article");
-    card.className = "expensive-card";
 
-    addText(card, "h2", "expensive-card__title", product.title);
-    addText(card, "p", "expensive-card__creator",
-      "By " + (product.creator || "Unknown creator"));
+function createProductCard(product) {
+  const card = document.createElement("article");
+  card.className = "expensive-card";
 
-    card.appendChild(createCountryDisplay(product.country_code));
+  addText(card, "h2", "expensive-card__title", product.title);
+  addText(card, "p", "expensive-card__creator",
+    "By " + (product.creator || "Unknown creator"));
 
-    addText(card, "p", "expensive-card__category",
-      product.category);
+  card.appendChild(createCountryDisplay(product.country_code));
 
-    addText(card, "p", "expensive-card__description",
-      product.blurb);
+  addText(card, "p", "expensive-card__category",
+    product.category);
 
-    const details = document.createElement("div");
-    details.className = "expensive-card__details";
+  addText(card, "p", "expensive-card__description",
+    product.blurb);
 
-    addText(details, "p", "", "Formats: " + (product.formats || "—"));
-    addText(details, "p", "", "Licence: " + (product.license || "—"));
-    addText(details, "p", "", "Refund period: " +
-      (product.refund_period || "—"));
+  const details = document.createElement("div");
+  details.className = "expensive-card__details";
 
-    card.appendChild(details);
+  addText(details, "p", "", "Formats: " + (product.formats || "—"));
+  addText(details, "p", "", "Licence: " + (product.license || "—"));
+  addText(details, "p", "", "Refund period: " +
+    (product.refund_period || "—"));
 
-    addText(card, "p", "expensive-card__price",
-      formatPrice(product.price));
+  card.appendChild(details);
 
-    addText(card, "p", "expensive-card__date",
-      "Added: " + formatDate(product.created_at));
+  addText(card, "p", "expensive-card__price",
+    formatPrice(product.price));
 
-    return card;
-  }
+  addText(card, "p", "expensive-card__date",
+    "Added: " + formatDate(product.created_at));
+
+  const actions = document.createElement("div");
+  actions.className = "expensive-card__actions";
+
+  const buyButton = document.createElement("button");
+  buyButton.type = "button";
+  buyButton.className = "btn btn--primary";
+  buyButton.textContent = "Buy Now";
+
+  buyButton.addEventListener("click", function () {
+    window.location.href =
+      "checkout.html?product=" + encodeURIComponent(product.id);
+  });
+
+  const cartButton = document.createElement("button");
+  cartButton.type = "button";
+  cartButton.className = "btn btn--wallet";
+  cartButton.textContent = "Add to Cart";
+
+  cartButton.addEventListener("click", function () {
+    if (!window.NLExpensiveCart) {
+      alert("Cart unavailable. Please refresh the page.");
+      return;
+    }
+
+    try {
+      window.NLExpensiveCart.add({
+        id: product.id,
+        title: product.title
+      });
+
+      cartButton.textContent = "Added to Cart";
+      cartButton.disabled = true;
+    } catch (error) {
+      alert(error.message || "Could not add this product.");
+    }
+  });
+
+  actions.appendChild(buyButton);
+  actions.appendChild(cartButton);
+  card.appendChild(actions);
+
+  return card;
+}
+
 
   function renderProducts() {
     const totalPages = Math.ceil(

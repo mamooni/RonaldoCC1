@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Premium Checkout — Northlight</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+
+<body data-requires-auth>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="topbar__logo" href="index.html">
+        <img src="logo.png" alt="Northlight" class="topbar__logo-img">
+      </a>
+      <div class="topbar__center">
+        <a href="expensive.html" class="topbar__brand">Northlight</a>
+      </div>
+      <div class="topbar__right">
+        <a class="tab" href="expensive-cart.html">Back to Cart</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <h1>Premium Product Checkout</h1>
+      <p>Payment will be taken from your Northlight wallet.</p>
+
+      <div id="checkoutLoading" role="status">
+        Preparing your checkout...
+      </div>
+
+      <div id="checkoutError" role="alert" hidden></div>
+
+      <div id="checkoutSummary" hidden>
+        <h2>Order Summary</h2>
+        <ul id="checkoutItems"></ul>
+        <p id="checkoutTotal">
+          Final price will be calculated securely by Northlight.
+        </p>
+        <button class="btn btn--primary" id="payButton" type="button">
+          Pay with Wallet
+        </button>
+      </div>
+
+      <section id="nameSection" hidden>
+        <h2>Payment successful</h2>
+        <p>Your purchase has been recorded. Enter your full name to continue.</p>
+
+        <form id="customerNameForm">
+          <label for="customerFullName">Full name</label>
+          <input
+            id="customerFullName"
+            name="full_name"
+            type="text"
+            maxlength="120"
+            autocomplete="name"
+            required
+          >
+          <button class="btn btn--primary" id="nameSubmit" type="submit">
+            Submit Name
+          </button>
+        </form>
+      </section>
+
+      <section id="supportSection" hidden>
+        <h2>You're all set</h2>
+        <p id="supportMessage">
+          Your purchase has been recorded. Please contact Northlight Support
+          to receive your products.
+        </p>
+        <a class="btn btn--primary" href="support.html">
+          Contact Support
+        </a>
+        <a class="tab" href="expensive.html">Return to Products</a>
+      </section>
+
+      <p id="checkoutStatus" role="status" aria-live="polite" hidden></p>
+    </section>
+  </main>
+
+  <script src="assets/js/menu.js" defer></script>
+  <script src="assets/js/session.js" defer></script>
+  <script src="assets/js/expensive-cart.js" defer></script>
+  <script src="assets/js/expensive-checkout.js" defer></script>
+</body>
+</html>

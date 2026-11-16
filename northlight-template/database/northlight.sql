@@ -140,6 +140,53 @@ CREATE TABLE IF NOT EXISTS `expensive_products` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- Legitimate digital product orders
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `expensive_product_orders` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` INT UNSIGNED NOT NULL,
+    `request_key` CHAR(36) NOT NULL,
+    `total_cents` BIGINT NOT NULL,
+    `full_name` VARCHAR(190) NULL,
+    `status` VARCHAR(32) NOT NULL DEFAULT 'awaiting_customer_name',
+    `created_at` BIGINT NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `expensive_orders_request` (`user_id`, `request_key`),
+    KEY `expensive_orders_user` (`user_id`, `id`),
+    CONSTRAINT `expensive_orders_user_fk`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `expensive_orders_total_positive`
+        CHECK (`total_cents` > 0),
+    CONSTRAINT `expensive_orders_status_valid`
+        CHECK (`status` IN (
+            'awaiting_customer_name',
+            'awaiting_fulfilment',
+            'fulfilled'
+        ))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `expensive_product_order_items` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `order_id` BIGINT UNSIGNED NOT NULL,
+    `product_id` INT UNSIGNED NOT NULL,
+    `title` VARCHAR(190) NOT NULL,
+    `price_cents` BIGINT NOT NULL,
+    `quantity` INT UNSIGNED NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `expensive_order_product` (`order_id`, `product_id`),
+    KEY `expensive_order_items_order` (`order_id`),
+    CONSTRAINT `expensive_order_items_order_fk`
+        FOREIGN KEY (`order_id`)
+        REFERENCES `expensive_product_orders` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `expensive_order_items_price_positive`
+        CHECK (`price_cents` > 0),
+    CONSTRAINT `expensive_order_items_quantity_positive`
+        CHECK (`quantity` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- Audit trail — who did what, kept for 180 days
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `audit` (
