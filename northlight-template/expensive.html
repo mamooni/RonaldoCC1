@@ -169,10 +169,17 @@
         No products have been added yet. Please check back later.
       </p>
 
-      <div
-        class="expensive-grid"
-        id="expensiveProducts"
-      ></div>
+      <div class="expensive-filters" aria-label="Filter products">
+        <label><span>Search products</span><input id="expensiveSearch" type="search" placeholder="Search name or product ID" /></label>
+        <label><span>Category</span><select id="expensiveCategory"><option value="">All categories</option></select></label>
+        <label><span>Country</span><select id="expensiveCountry"><option value="">All countries</option></select></label>
+      </div>
+      <div class="expensive-table-scroll">
+        <table class="expensive-table">
+          <thead><tr><th>Product</th><th>Category</th><th>Country</th><th>ID</th><th>Format</th><th>Licence</th><th>Expiry</th><th class="is-numeric">Price</th><th class="is-numeric">Action</th></tr></thead>
+          <tbody id="expensiveProducts"></tbody>
+        </table>
+      </div>
 
       <div class="expensive-pagination" id="expensivePagination" hidden>
         <button type="button" id="previousPage" disabled>
