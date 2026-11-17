@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS `purchases` (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `expensive_products` (
     `id`           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `product_id`   VARCHAR(64) NULL,
+    `exp_date`     DATE NULL,
     `title`        VARCHAR(190) NOT NULL,
     `creator`      VARCHAR(100) NOT NULL,
     `category`     VARCHAR(100) NOT NULL,
@@ -131,6 +133,7 @@ CREATE TABLE IF NOT EXISTS `expensive_products` (
     `created_at`   BIGINT NOT NULL,
     `created_by`   INT UNSIGNED NULL,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `expensive_products_product_id` (`product_id`),
     KEY `expensive_products_created` (`created_at`, `id`),
     CONSTRAINT `expensive_products_price_positive`
         CHECK (`price_cents` > 0),
