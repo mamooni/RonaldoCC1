@@ -1273,6 +1273,8 @@ def display_exp_date(value):
     """Display a stored YYYY-MM-DD date as MM/YYYY."""
     if not value:
         return ""
+    if hasattr(value, "isoformat"):
+        value = value.isoformat()
     try:
         return f"{int(value[5:7]):02d}/{int(value[:4]):04d}"
     except (TypeError, ValueError, IndexError):
