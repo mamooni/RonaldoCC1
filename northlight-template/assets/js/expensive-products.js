@@ -58,17 +58,19 @@
     addCell(row, p.formats); addCell(row, p.license); addCell(row, p.expDate);
     const price = Number(p.price);
     addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "is-numeric");
-    const actions = document.createElement("td"); actions.className = "is-numeric expensive-actions";
-    actions.appendChild(button("Buy", "btn btn--primary", function () {
+    const actions = document.createElement("td"); actions.className = "is-numeric";
+    const actionGroup = document.createElement("div"); actionGroup.className = "expensive-actions";
+    actionGroup.appendChild(button("Buy", "btn btn--primary", function () {
       window.location.href = "checkout.html?product=" + encodeURIComponent(p.id);
     }));
-    actions.appendChild(button("Add", "btn btn--wallet", function (event) {
+    actionGroup.appendChild(button("Add", "btn btn--wallet", function (event) {
       if (!window.NLExpensiveCart) { window.alert("Cart unavailable. Please refresh the page."); return; }
       try {
         window.NLExpensiveCart.add({ id: p.id, title: p.title });
         event.currentTarget.textContent = "Added"; event.currentTarget.disabled = true;
       } catch (err) { window.alert(err.message || "Could not add this product."); }
     }));
+    actions.appendChild(actionGroup);
     row.appendChild(actions); return row;
   }
   function render() {
