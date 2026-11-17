@@ -11,6 +11,10 @@
   const note = document.getElementById("productsAdminNote");
   const importButton = document.getElementById("importExpensiveDraft");
   const tableBody = document.getElementById("expensiveProductsBody");
+  const loadMoreButton = document.getElementById("loadMoreExpensiveProducts");
+  const PRODUCTS_PER_PAGE = 10;
+  let allProducts = [];
+  let visibleProductCount = PRODUCTS_PER_PAGE;
   const emptyMessage = document.getElementById("expensiveProductsEmpty");
   const editPanel = document.getElementById("editExpensiveProduct");
   const editForm = document.getElementById("editExpensiveProductForm");
@@ -201,79 +205,88 @@
     }
   }
 
+  function renderProducts() {
+    tableBody.replaceChildren();
+
+    allProducts.slice(0, visibleProductCount).forEach(function (product) {
+      const row = document.createElement("tr");
+
+      addCell(row, product.id);
+      addCell(row, product.product_id || "—");
+      addCell(row, product.expDate || "—");
+      addCell(row, product.title);
+      addCell(row, product.creator);
+      addCell(row, product.category);
+
+      const price = Number(product.price);
+      addCell(
+        row,
+        Number.isFinite(price) ? "$" + price.toFixed(2) : "—"
+      );
+
+      const added = product.created_at
+        ? new Date(Number(product.created_at) * 1000).toLocaleString()
+        : "—";
+      addCell(row, added);
+
+      const actions = document.createElement("td");
+
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "admin__refresh";
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", function () {
+        openEditProduct(product);
+      });
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "admin__refresh";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", function () {
+        deleteProduct(product.id, deleteButton);
+      });
+
+      actions.appendChild(editButton);
+      actions.appendChild(deleteButton);
+      row.appendChild(actions);
+      tableBody.appendChild(row);
+    });
+
+    emptyMessage.hidden = allProducts.length !== 0;
+    if (loadMoreButton) {
+      const remaining = Math.max(0, allProducts.length - visibleProductCount);
+      loadMoreButton.hidden = remaining === 0;
+      loadMoreButton.textContent = remaining > 0
+        ? "Load more (" + Math.min(PRODUCTS_PER_PAGE, remaining) + " more)"
+        : "All products loaded";
+    }
+  }
+
+  if (loadMoreButton) {
+    loadMoreButton.addEventListener("click", function () {
+      visibleProductCount = Math.min(
+        visibleProductCount + PRODUCTS_PER_PAGE,
+        allProducts.length
+      );
+      renderProducts();
+    });
+  }
+
   async function loadProducts() {
     try {
       const response = await fetch("api/expensive-products");
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error || "Could not load products."
-        );
+        throw new Error(data.error || "Could not load products.");
       }
 
-      tableBody.replaceChildren();
-
-      const products = Array.isArray(data.products)
-        ? data.products
-        : [];
-
-      products.forEach(function (product, index) {
-        const row = document.createElement("tr");
-
-        addCell(row, product.id);
-        addCell(row, product.product_id || "—");
-        addCell(row, product.expDate || "—");
-        addCell(row, product.title);
-        addCell(row, product.creator);
-        addCell(row, product.category);
-
-        const price = Number(product.price);
-        addCell(
-          row,
-          Number.isFinite(price)
-            ? "$" + price.toFixed(2)
-            : "—"
-        );
-
-        const added = product.created_at
-          ? new Date(
-              Number(product.created_at) * 1000
-            ).toLocaleString()
-          : "—";
-
-        addCell(row, added);
-
-        const actions = document.createElement("td");
-
-        const editButton = document.createElement("button");
-        editButton.type = "button";
-        editButton.className = "admin__refresh";
-        editButton.textContent = "Edit";
-        editButton.addEventListener("click", function () {
-          openEditProduct(product);
-        });
-
-        const deleteButton = document.createElement("button");
-        deleteButton.type = "button";
-        deleteButton.className = "admin__refresh";
-        deleteButton.textContent = "Delete";
-        deleteButton.addEventListener("click", function () {
-          deleteProduct(product.id, deleteButton);
-        });
-
-        actions.appendChild(editButton);
-        actions.appendChild(deleteButton);
-        row.appendChild(actions);
-        tableBody.appendChild(row);
-      });
-
-      emptyMessage.hidden = products.length !== 0;
+      allProducts = Array.isArray(data.products) ? data.products : [];
+      visibleProductCount = PRODUCTS_PER_PAGE;
+      renderProducts();
     } catch (error) {
-      showNote(
-        error.message || "Could not load existing products.",
-        true
-      );
+      showNote(error.message || "Could not load existing products.", true);
     }
   }
 
