@@ -46,6 +46,7 @@ What is deliberately simple, because this is a learning/demo project:
 import base64
 import calendar
 import contextlib
+import csv
 import hashlib
 import hmac
 import json
@@ -1602,6 +1603,7 @@ POST_ROUTES = {
     "/api/expensive-product-name": "api_expensive_product_name",
     "/api/admin/payment": "api_admin_payment",
     "/api/admin/expensive-products": "api_admin_expensive_products",
+    "/api/admin/expensive-products/import-draft": "api_admin_import_expensive_draft",
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
 }
@@ -2812,6 +2814,112 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     
+
+    def api_admin_import_expensive_draft(self, payload):
+        """Import the committed draft catalogue once; existing public IDs are never overwritten."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        source = WEB_ROOT / "database" / "inventory-draft.csv"
+        try:
+            with source.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+        except (OSError, csv.Error):
+            return self._error(500, "The draft inventory file could not be read.")
+
+        if len(rows) != 150:
+            return self._json(
+                500,
+                {"error": "The draft inventory must contain exactly 150 rows.",
+                 "found": len(rows)},
+            )
+
+        cleaned = []
+        seen = set()
+        for index, row in enumerate(rows, start=1):
+            public_id = (row.get("Product ID") or "").strip()
+            title = (row.get("Product") or "").strip()
+            category = (row.get("Category") or "").strip()
+            formats = (row.get("Format") or "").strip()
+            expiry, expiry_error = parse_exp_date(
+                (row.get("Expiry (MM/YYYY)") or "").strip()
+            )
+            cents, price_error = parse_cents(
+                (row.get("Price (USD)") or "").strip(), low=1, high=100000000
+            )
+            if (
+                not public_id or len(public_id) > 64
+                or not title or len(title) > 190
+                or not category or len(category) > 100
+                or not formats or len(formats) > 255
+                or public_id in seen or expiry_error or price_error
+            ):
+                return self._json(
+                    500,
+                    {"error": f"Draft inventory row {index} is invalid.",
+                     "expiry_error": expiry_error, "price_error": price_error},
+                )
+            seen.add(public_id)
+            cleaned.append({
+                "product_id": public_id,
+                "exp_date": expiry,
+                "title": title,
+                "creator": "To be updated",
+                "category": category,
+                "formats": formats,
+                "license": "To be updated",
+                "refund_period": "To be updated",
+                "country_code": "GL",
+                "price_cents": cents,
+                "blurb": "Catalogue listing. Product details and licence terms are to be updated.",
+            })
+
+        created = 0
+        skipped = 0
+        now = int(time.time())
+        with db(write=True) as conn:
+            for product in cleaned:
+                exists = conn.execute(
+                    "SELECT 1 FROM expensive_products WHERE product_id = ?",
+                    (product["product_id"],),
+                ).fetchone()
+                if exists is not None:
+                    skipped += 1
+                    continue
+                conn.execute(
+                    "INSERT INTO expensive_products "
+                    "(product_id, exp_date, title, creator, category, formats, license, "
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        product["product_id"], product["exp_date"], product["title"],
+                        product["creator"], product["category"], product["formats"],
+                        product["license"], product["refund_period"],
+                        product["country_code"], product["price_cents"],
+                        product["blurb"], now, admin["id"],
+                    ),
+                )
+                created += 1
+
+            audit(
+                conn,
+                "expensive_products.draft_import",
+                actor=admin,
+                target="inventory-draft.csv",
+                detail=f"Imported {created}; skipped {skipped} existing product ID(s).",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200,
+            {"ok": True, "created": created, "skipped": skipped,
+             "total": len(cleaned)},
+        )
+
     def api_admin_update_expensive_product(self, payload):
         """Update one existing legitimate digital product."""
         admin = self._require_admin()
