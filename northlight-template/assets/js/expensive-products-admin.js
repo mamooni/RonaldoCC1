@@ -9,6 +9,7 @@
   const addButton = document.getElementById("addProductSlot");
   const saveButton = document.getElementById("saveExpensiveProducts");
   const note = document.getElementById("productsAdminNote");
+  const importButton = document.getElementById("importExpensiveDraft");
   const tableBody = document.getElementById("expensiveProductsBody");
   const emptyMessage = document.getElementById("expensiveProductsEmpty");
   const editPanel = document.getElementById("editExpensiveProduct");
@@ -413,6 +414,37 @@
       saveButton.disabled = false;
     }
   });
+
+  if (importButton) {
+    importButton.addEventListener("click", async function () {
+      const confirmed = window.confirm(
+        "Import the 150 prepared draft products? Existing Product IDs will be skipped, not changed."
+      );
+      if (!confirmed) return;
+
+      importButton.disabled = true;
+      showNote("Importing draft products… please keep this page open.", false);
+      try {
+        const response = await fetch("api/admin/expensive-products/import-draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not import the draft inventory.");
+        showNote(
+          "Import complete: " + data.created + " added, " + data.skipped +
+          " already existed and were skipped. Total checked: " + data.total + ".",
+          false
+        );
+        await loadProducts();
+      } catch (error) {
+        showNote(error.message || "Could not import the draft inventory.", true);
+      } finally {
+        importButton.disabled = false;
+      }
+    });
+  }
 
   // Populate the country dropdown in the original HTML form.
   fields.querySelectorAll(
