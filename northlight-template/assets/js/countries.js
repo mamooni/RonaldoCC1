@@ -3,6 +3,7 @@
   "use strict";
 
   var countries = [
+    ["GL", "Global"],
     ["AF", "Afghanistan"],
     ["AL", "Albania"],
     ["DZ", "Algeria"],
