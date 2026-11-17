@@ -1,262 +1,104 @@
-
 (function () {
   "use strict";
-
-  const productsContainer = document.getElementById("expensiveProducts");
-  if (!productsContainer) return;
-
-  const loadingMessage = document.getElementById("expensiveLoading");
-  const errorMessage = document.getElementById("expensiveError");
-  const emptyMessage = document.getElementById("expensiveEmpty");
+  const body = document.getElementById("expensiveProducts");
+  if (!body) return;
+  const loading = document.getElementById("expensiveLoading");
+  const errorBox = document.getElementById("expensiveError");
+  const empty = document.getElementById("expensiveEmpty");
   const pagination = document.getElementById("expensivePagination");
-  const previousPageButton = document.getElementById("previousPage");
-  const nextPageButton = document.getElementById("nextPage");
+  const prev = document.getElementById("previousPage");
+  const next = document.getElementById("nextPage");
   const pageInfo = document.getElementById("pageInfo");
+  const search = document.getElementById("expensiveSearch");
+  const category = document.getElementById("expensiveCategory");
+  const country = document.getElementById("expensiveCountry");
+  const PER_PAGE = 20;
+  let products = [], visible = [], page = 1;
 
-  const PRODUCTS_PER_PAGE = 20;
-
-  let allProducts = [];
-  let currentPage = 1;
-
-  function addText(parent, tag, className, value) {
-    const element = document.createElement(tag);
-
-    if (className) {
-      element.className = className;
-    }
-
-    element.textContent = value == null ? "" : String(value);
-    parent.appendChild(element);
-
-    return element;
+  function addCell(row, value, cls) {
+    const td = document.createElement("td");
+    td.textContent = value == null || value === "" ? "—" : String(value);
+    if (cls) td.className = cls;
+    row.appendChild(td);
+    return td;
   }
-
-  function formatPrice(value) {
-    const price = Number(value);
-
-    if (!Number.isFinite(price)) {
-      return "Price unavailable";
-    }
-
-    return "$" + price.toFixed(2);
+  function countryLabel(code) {
+    const found = (window.NL_COUNTRIES || []).find(function (item) { return item.code === code; });
+    return found ? found.name : (code || "—");
   }
-
-  function formatDate(timestamp) {
-    const seconds = Number(timestamp);
-
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      return "Date unavailable";
-    }
-
-    return new Date(seconds * 1000).toLocaleString();
+  function option(select, value, label) {
+    const el = document.createElement("option");
+    el.value = value; el.textContent = label; select.appendChild(el);
   }
-
-  function getCountryName(code) {
-    const countries = window.NL_COUNTRIES || [];
-    const country = countries.find(function (item) {
-      return item.code === code;
+  function setupFilters() {
+    const cats = Array.from(new Set(products.map(p => p.category).filter(Boolean))).sort();
+    const countries = Array.from(new Set(products.map(p => p.country_code).filter(Boolean))).sort();
+    category.replaceChildren(); option(category, "", "All categories");
+    cats.forEach(v => option(category, v, v));
+    country.replaceChildren(); option(country, "", "All countries");
+    countries.forEach(v => option(country, v, countryLabel(v)));
+  }
+  function filterProducts() {
+    const q = search.value.trim().toLowerCase();
+    visible = products.filter(function (p) {
+      const haystack = [p.title, p.product_id, p.category, p.formats, p.license, p.blurb].join(" ").toLowerCase();
+      return (!q || haystack.includes(q)) && (!category.value || p.category === category.value) &&
+        (!country.value || p.country_code === country.value);
     });
-
-    return country ? country.name : "Country not specified";
+    page = 1; render();
   }
-
-  function createCountryDisplay(code) {
-    const countryName = getCountryName(code);
-    const countryRow = document.createElement("p");
-    countryRow.className = "expensive-card__country";
-
-    const flags = window.NL_FLAGS || {};
-    const flagArtwork = flags[code];
-
-    if (flagArtwork) {
-      const flag = document.createElement("span");
-      flag.className = "expensive-card__flag";
-
-      const svg = document.createElementNS(
-        "http://www.w3.org/2000/svg",
-        "svg"
-      );
-
-      svg.setAttribute("viewBox", "0 0 36 24");
-      svg.setAttribute("width", "24");
-      svg.setAttribute("height", "16");
-      svg.setAttribute("aria-hidden", "true");
-
-      svg.innerHTML = flagArtwork;
-      flag.appendChild(svg);
-      countryRow.appendChild(flag);
-    }
-
-    countryRow.appendChild(
-      document.createTextNode(" Intended for: " + countryName)
-    );
-
-    return countryRow;
+  function button(label, cls, handler) {
+    const b = document.createElement("button"); b.type = "button"; b.className = cls;
+    b.textContent = label; b.addEventListener("click", handler); return b;
   }
-
-
-function createProductCard(product) {
-  const card = document.createElement("article");
-  card.className = "expensive-card";
-
-  addText(card, "h2", "expensive-card__title", product.title);
-  addText(card, "p", "expensive-card__creator",
-    "By " + (product.creator || "Unknown creator"));
-
-  card.appendChild(createCountryDisplay(product.country_code));
-
-  addText(card, "p", "expensive-card__category",
-    product.category);
-
-  addText(card, "p", "expensive-card__description",
-    product.blurb);
-
-  const details = document.createElement("div");
-  details.className = "expensive-card__details";
-
-  addText(details, "p", "", "Formats: " + (product.formats || "—"));
-  addText(details, "p", "", "Licence: " + (product.license || "—"));
-  addText(details, "p", "", "Refund period: " +
-    (product.refund_period || "—"));
-
-  card.appendChild(details);
-
-  addText(card, "p", "expensive-card__price",
-    formatPrice(product.price));
-
-  addText(card, "p", "expensive-card__date",
-    "Added: " + formatDate(product.created_at));
-
-  const actions = document.createElement("div");
-  actions.className = "expensive-card__actions";
-
-  const buyButton = document.createElement("button");
-  buyButton.type = "button";
-  buyButton.className = "btn btn--primary";
-  buyButton.textContent = "Buy Now";
-
-  buyButton.addEventListener("click", function () {
-    window.location.href =
-      "checkout.html?product=" + encodeURIComponent(product.id);
-  });
-
-  const cartButton = document.createElement("button");
-  cartButton.type = "button";
-  cartButton.className = "btn btn--wallet";
-  cartButton.textContent = "Add to Cart";
-
-  cartButton.addEventListener("click", function () {
-    if (!window.NLExpensiveCart) {
-      alert("Cart unavailable. Please refresh the page.");
-      return;
-    }
-
+  function renderRow(p) {
+    const row = document.createElement("tr");
+    addCell(row, p.title, "product-name"); addCell(row, p.category);
+    addCell(row, countryLabel(p.country_code)); addCell(row, p.product_id);
+    addCell(row, p.formats); addCell(row, p.license); addCell(row, p.expDate);
+    const price = Number(p.price);
+    addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "is-numeric");
+    const actions = document.createElement("td"); actions.className = "is-numeric expensive-actions";
+    actions.appendChild(button("Buy", "btn btn--primary", function () {
+      window.location.href = "checkout.html?product=" + encodeURIComponent(p.id);
+    }));
+    actions.appendChild(button("Add", "btn btn--wallet", function (event) {
+      if (!window.NLExpensiveCart) { window.alert("Cart unavailable. Please refresh the page."); return; }
+      try {
+        window.NLExpensiveCart.add({ id: p.id, title: p.title });
+        event.currentTarget.textContent = "Added"; event.currentTarget.disabled = true;
+      } catch (err) { window.alert(err.message || "Could not add this product."); }
+    }));
+    row.appendChild(actions); return row;
+  }
+  function render() {
+    const pages = Math.max(1, Math.ceil(visible.length / PER_PAGE));
+    page = Math.min(page, pages);
+    body.replaceChildren();
+    visible.slice((page - 1) * PER_PAGE, page * PER_PAGE).forEach(p => body.appendChild(renderRow(p)));
+    empty.hidden = visible.length > 0;
+    pagination.hidden = visible.length <= PER_PAGE;
+    pageInfo.textContent = "Page " + page + " of " + pages;
+    prev.disabled = page === 1; next.disabled = page === pages;
+  }
+  async function load() {
+    loading.hidden = false; errorBox.hidden = true; empty.hidden = true; body.replaceChildren();
     try {
-      window.NLExpensiveCart.add({
-        id: product.id,
-        title: product.title
-      });
-
-      cartButton.textContent = "Added to Cart";
-      cartButton.disabled = true;
-    } catch (error) {
-      alert(error.message || "Could not add this product.");
-    }
-  });
-
-  actions.appendChild(buyButton);
-  actions.appendChild(cartButton);
-  card.appendChild(actions);
-
-  return card;
-}
-
-
-  function renderProducts() {
-    const totalPages = Math.ceil(
-      allProducts.length / PRODUCTS_PER_PAGE
-    );
-
-    const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE;
-    const pageProducts = allProducts.slice(
-      startIndex,
-      startIndex + PRODUCTS_PER_PAGE
-    );
-
-    productsContainer.replaceChildren();
-
-    pageProducts.forEach(function (product) {
-      productsContainer.appendChild(createProductCard(product));
-    });
-
-    pagination.hidden = totalPages <= 1;
-
-    pageInfo.textContent =
-      "Page " + currentPage + " of " + totalPages;
-
-    previousPageButton.disabled = currentPage === 1;
-    nextPageButton.disabled = currentPage === totalPages;
-  }
-
-  async function loadProducts() {
-    loadingMessage.hidden = false;
-    errorMessage.hidden = true;
-    emptyMessage.hidden = true;
-    productsContainer.replaceChildren();
-
-    try {
-      const response = await fetch("/api/expensive-products", {
-        headers: {
-          "Accept": "application/json"
-        }
-      });
-
+      const response = await fetch("/api/expensive-products", { headers: { Accept: "application/json" } });
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Could not load products.");
-      }
-
-      const products = Array.isArray(data.products)
-        ? data.products
-        : [];
-
-      loadingMessage.hidden = true;
-
-      if (products.length === 0) {
-        emptyMessage.hidden = false;
-        return;
-      }
-
-      allProducts = products;
-      currentPage = 1;
-      renderProducts();
-
-    } catch (error) {
-      loadingMessage.hidden = true;
-      errorMessage.textContent =
-        error.message || "Something went wrong while loading products.";
-      errorMessage.hidden = false;
+      if (!response.ok) throw new Error(data.error || "Could not load products.");
+      products = Array.isArray(data.products) ? data.products : [];
+      loading.hidden = true;
+      if (!products.length) { empty.hidden = false; pagination.hidden = true; return; }
+      setupFilters(); visible = products.slice(); render();
+    } catch (err) {
+      loading.hidden = true; errorBox.textContent = err.message || "Could not load products."; errorBox.hidden = false;
     }
   }
-
-  previousPageButton.addEventListener("click", function () {
-    if (currentPage > 1) {
-      currentPage--;
-      renderProducts();
-    }
-  });
-
-  nextPageButton.addEventListener("click", function () {
-    const totalPages = Math.ceil(
-      allProducts.length / PRODUCTS_PER_PAGE
-    );
-
-    if (currentPage < totalPages) {
-      currentPage++;
-      renderProducts();
-    }
-  });
-
-  loadProducts();
+  search.addEventListener("input", filterProducts);
+  category.addEventListener("change", filterProducts);
+  country.addEventListener("change", filterProducts);
+  prev.addEventListener("click", function () { if (page > 1) { page--; render(); } });
+  next.addEventListener("click", function () { if (page < Math.ceil(visible.length / PER_PAGE)) { page++; render(); } });
+  load();
 })();
