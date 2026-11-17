@@ -138,6 +138,8 @@
   function openEditProduct(product) {
     editingProductId = product.id;
 
+    editForm.elements.namedItem("product_id").value = product.product_id || "";
+    editForm.elements.namedItem("expDate").value = product.expDate || "";
     editForm.elements.namedItem("title").value = product.title || "";
     editForm.elements.namedItem("creator").value = product.creator || "";
     editForm.elements.namedItem("country_code").value = product.country_code || "";
@@ -218,7 +220,9 @@
       products.forEach(function (product, index) {
         const row = document.createElement("tr");
 
-        addCell(row, index + 1);
+        addCell(row, product.id);
+        addCell(row, product.product_id || "—");
+        addCell(row, product.expDate || "—");
         addCell(row, product.title);
         addCell(row, product.creator);
         addCell(row, product.category);
