@@ -586,6 +586,8 @@ CREATE INDEX IF NOT EXISTS purchases_user ON purchases(user_id, id);
 EXPENSIVE_PRODUCTS_TABLE = """
 CREATE TABLE IF NOT EXISTS expensive_products (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id    TEXT,
+    exp_date      TEXT,
     title         TEXT NOT NULL,
     creator       TEXT NOT NULL,
     category      TEXT NOT NULL,
@@ -766,6 +768,18 @@ def _migrate(conn):
     conn.executescript(PAYMENTS_TABLE)
     conn.executescript(PURCHASES_TABLE)
     conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
+
+    # Add catalogue fields to existing SQLite databases without rebuilding rows.
+    product_cols = _table_columns(conn, "expensive_products")
+    if "product_id" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN product_id TEXT")
+    if "exp_date" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN exp_date TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS expensive_products_product_id "
+        "ON expensive_products(product_id)"
+    )
+
     conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
     conn.executescript(AUDIT_TABLE)
     conn.executescript(PASSWORD_RESETS_TABLE)
@@ -862,6 +876,27 @@ def init_mysql():
                 + MYSQL["database"]
                 + "` (phpMyAdmin → Import) and start again."
             )
+        # MySQL/TiDB deployments need an explicit additive migration too.
+        product_cols = _table_columns(conn, "expensive_products")
+        if "product_id" not in product_cols:
+            conn.execute(
+                "ALTER TABLE expensive_products ADD COLUMN product_id VARCHAR(64) NULL"
+            )
+        if "exp_date" not in product_cols:
+            conn.execute(
+                "ALTER TABLE expensive_products ADD COLUMN exp_date DATE NULL"
+            )
+        product_id_index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("expensive_products", "expensive_products_product_id"),
+        ).fetchone()
+        if product_id_index is None:
+            conn.execute(
+                "CREATE UNIQUE INDEX expensive_products_product_id "
+                "ON expensive_products(product_id)"
+            )
+
         _seed_admin(conn)
         dropped = prune_sessions(conn)
         conn.commit()
