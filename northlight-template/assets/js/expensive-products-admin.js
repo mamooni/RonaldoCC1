@@ -53,6 +53,8 @@
     wrapper.appendChild(heading);
 
     const inputs = [
+      ["Public Product ID", "product_id", "text", 64, "NL-WEB-001"],
+      ["Expiry (MM/YYYY)", "expDate", "text", 7, "11/2028"],
       ["Title", "title", "text", 190, ""],
       ["Creator", "creator", "text", 100, ""],
       ["Category", "category", "text", 100, "Interface kit"],
