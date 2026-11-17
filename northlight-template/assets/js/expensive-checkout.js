@@ -18,6 +18,7 @@
   const nameSubmit = $("nameSubmit");
   const supportSection = $("supportSection");
   const supportMessage = $("supportMessage");
+  const supportOrderId = $("supportOrderId");
   const status = $("checkoutStatus");
 
   const CART_KEY = "nl.expensive.checkout.intent.v1";
@@ -222,7 +223,8 @@
       if (order.full_name) {
         sessionStorage.removeItem(ACTIVE_ORDER_KEY);
         supportMessage.textContent =
-          "Your order already has a customer name recorded. Please contact Northlight Support for assistance.";
+          "Your order already has a customer name recorded. Contact one of our Telegram support accounts below to complete your order and receive your products.";
+        supportOrderId.textContent = "Order ID: #" + order.id;
         nameSection.hidden = true;
         supportSection.hidden = false;
         loading.hidden = true;
@@ -357,7 +359,9 @@
       sessionStorage.removeItem(ACTIVE_ORDER_KEY);
 
       nameSection.hidden = true;
-      supportMessage.textContent = response.data.message;
+      supportMessage.textContent =
+        "Your order information has been saved. Contact one of our Telegram support accounts below to complete your order and receive your products.";
+      supportOrderId.textContent = "Order ID: #" + currentOrderId;
       supportSection.hidden = false;
 
       showStatus("Your order information has been saved.");
