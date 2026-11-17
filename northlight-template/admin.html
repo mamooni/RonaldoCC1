@@ -309,6 +309,14 @@
             <div class="admin__product-form">
               <h3>Product 1</h3>
 
+              <label>Public Product ID
+                <input name="product_id" maxlength="64" placeholder="NL-WEB-001" required />
+              </label>
+
+              <label>Expiry (MM/YYYY)
+                <input name="expDate" maxlength="7" placeholder="11/2028" pattern="(0[1-9]|1[0-2])/[0-9]{4}" title="Enter expiry as MM/YYYY" required />
+              </label>
+
               <label>Title
                 <input name="title" maxlength="190" required />
               </label>
@@ -363,6 +371,14 @@
 
           <form id="editExpensiveProductForm">
             <div class="admin__product-form">
+              <label>Public Product ID
+                <input name="product_id" maxlength="64" placeholder="NL-WEB-001" required />
+              </label>
+
+              <label>Expiry (MM/YYYY)
+                <input name="expDate" maxlength="7" placeholder="11/2028" pattern="(0[1-9]|1[0-2])/[0-9]{4}" title="Enter expiry as MM/YYYY" required />
+              </label>
+
               <label>Title
                 <input name="title" maxlength="190" required />
               </label>
@@ -420,7 +436,9 @@
           <table class="atable">
             <thead>
               <tr>
-                <th>#</th>
+                <th>DB ID</th>
+                <th>Product ID</th>
+                <th>Expiry</th>
                 <th>Title</th>
                 <th>Creator</th>
                 <th>Category</th>
