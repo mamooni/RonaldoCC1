@@ -3813,18 +3813,21 @@ class Handler(BaseHTTPRequestHandler):
                 if price_cents <= 0:
                     return self._json(400, {"error": "Invalid product price."})
 
-            line_total = price_cents * quantity
+                line_total = price_cents * quantity
 
-            if (
-                line_total > 9_000_000_000_000_000
-                or total_cents > 9_000_000_000_000_000 - line_total
-            ):
-                return self._json(400, {"error": "Order total is too large."})
+                if (
+                    line_total > 9_000_000_000_000_000
+                    or total_cents > 9_000_000_000_000_000 - line_total
+                ):
+                    return self._json(400, {"error": "Order total is too large."})
 
-            total_cents += line_total
-
-            order_items.append((
-            ))
+                total_cents += line_total
+                order_items.append((
+                    product_id,
+                    product["title"],
+                    price_cents,
+                    quantity,
+                ))
 
             paid = conn.execute(
                 "UPDATE users SET balance_cents = balance_cents - ? "
@@ -3898,16 +3901,22 @@ class Handler(BaseHTTPRequestHandler):
         if user is None:
             return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
 
-        try:
-            order_id = int(payload.get("order_id"))
-        except (TypeError, ValueError):
-            return self._json(400, {"error": "Invalid order."})
-
-        full_name = str(payload.get("full_name") or "").strip()
+        raw_order_id = payload.get("order_id")
+        raw_full_name = payload.get("full_name")
 
         if (
-            order_id <= 0
-            or len(full_name) < 2
+            isinstance(raw_order_id, bool)
+            or not isinstance(raw_order_id, int)
+            or raw_order_id <= 0
+            or not isinstance(raw_full_name, str)
+        ):
+            return self._json(400, {"error": "Please enter a valid order and full name."})
+
+        order_id = raw_order_id
+        full_name = raw_full_name.strip()
+
+        if (
+            len(full_name) < 2
             or len(full_name) > 190
             or any(ord(char) < 32 for char in full_name)
         ):
