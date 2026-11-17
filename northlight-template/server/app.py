@@ -44,6 +44,7 @@ What is deliberately simple, because this is a learning/demo project:
 """
 
 import base64
+import calendar
 import contextlib
 import hashlib
 import hmac
@@ -1252,6 +1253,30 @@ def goods_catalogue():
 def dollars(cents) -> float:
     """Cents -> the JSON number the pages already expect ($74.00 -> 74.0)."""
     return round(float(cents or 0) / 100.0, 2)
+
+
+def parse_exp_date(value):
+    """Accept MM/YYYY and store the final calendar day of that month."""
+    if not isinstance(value, str):
+        return None, "Expiry date is required in MM/YYYY format."
+    match = re.fullmatch(r"(0[1-9]|1[0-2])/(\d{4})", value.strip())
+    if not match:
+        return None, "Expiry date must use MM/YYYY format."
+    month, year = int(match.group(1)), int(match.group(2))
+    if year < 2000:
+        return None, "Expiry year must be 2000 or later."
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-{last_day:02d}", None
+
+
+def display_exp_date(value):
+    """Display a stored YYYY-MM-DD date as MM/YYYY."""
+    if not value:
+        return ""
+    try:
+        return f"{int(value[5:7]):02d}/{int(value[:4]):04d}"
+    except (TypeError, ValueError, IndexError):
+        return ""
 
 
 def parse_cents(raw, low=0, high=0):
@@ -2641,6 +2666,7 @@ class Handler(BaseHTTPRequestHandler):
 
         cleaned = []
         errors = []
+        seen_product_ids = set()
 
         for index, item in enumerate(items, start=1):
             if not isinstance(item, dict):
@@ -2688,6 +2714,27 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     product["country_code"] = country_code
 
+            public_id = item.get("product_id")
+            if not isinstance(public_id, str):
+                errors.append(f"Product {index}: Product ID is required.")
+            else:
+                public_id = public_id.strip()
+                if not public_id:
+                    errors.append(f"Product {index}: Product ID is required.")
+                elif len(public_id) > 64:
+                    errors.append(f"Product {index}: Product ID must be 64 characters or fewer.")
+                elif public_id in seen_product_ids:
+                    errors.append(f"Product {index}: duplicate Product ID in this submission.")
+                else:
+                    seen_product_ids.add(public_id)
+                    product["product_id"] = public_id
+
+            expiry, expiry_error = parse_exp_date(item.get("expDate"))
+            if expiry_error:
+                errors.append(f"Product {index}: {expiry_error}")
+            else:
+                product["exp_date"] = expiry
+
             cents, price_error = parse_cents(
                 item.get("price"), low=1, high=100000000
             )
@@ -2711,16 +2758,27 @@ class Handler(BaseHTTPRequestHandler):
         now = int(time.time())
 
         with db(write=True) as conn:
+            for product in cleaned:
+                duplicate = conn.execute(
+                    "SELECT 1 FROM expensive_products WHERE product_id = ?",
+                    (product["product_id"],),
+                ).fetchone()
+                if duplicate is not None:
+                    return self._json(
+                        409, {"error": f"Product ID {product['product_id']} is already in use."}
+                    )
+
             created_ids = []
 
             for product in cleaned:
                 result = conn.execute(
                     "INSERT INTO expensive_products "
-                    "(title, creator, category, formats, license, "
-                    "refund_period, country_code, price_cents, "
-                    "blurb, created_at, created_by) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(product_id, exp_date, title, creator, category, formats, license, "
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
+                        product["product_id"],
+                        product["exp_date"],
                         product["title"],
                         product["creator"],
                         product["category"],
@@ -2818,6 +2876,24 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 product["country_code"] = country_code
 
+        public_id = payload.get("product_id")
+        if not isinstance(public_id, str):
+            errors.append("Product ID is required.")
+        else:
+            public_id = public_id.strip()
+            if not public_id:
+                errors.append("Product ID is required.")
+            elif len(public_id) > 64:
+                errors.append("Product ID must be 64 characters or fewer.")
+            else:
+                product["product_id"] = public_id
+
+        expiry, expiry_error = parse_exp_date(payload.get("expDate"))
+        if expiry_error:
+            errors.append(expiry_error)
+        else:
+            product["exp_date"] = expiry
+
         cents, price_error = parse_cents(
             payload.get("price"), low=1, high=100000000
         )
@@ -2845,13 +2921,25 @@ class Handler(BaseHTTPRequestHandler):
             if existing is None:
                 return self._json(404, {"error": "Product not found."})
 
+            duplicate = conn.execute(
+                "SELECT 1 FROM expensive_products WHERE product_id = ? AND id <> ?",
+                (product["product_id"], product_id),
+            ).fetchone()
+            if duplicate is not None:
+                return self._json(
+                    409, {"error": f"Product ID {product['product_id']} is already in use."}
+                )
+
             conn.execute(
                 "UPDATE expensive_products SET "
+                "product_id = ?, exp_date = ?, "
                 "title = ?, creator = ?, category = ?, formats = ?, "
                 "license = ?, refund_period = ?, country_code = ?, "
                 "price_cents = ?, blurb = ? "
                 "WHERE id = ?",
                 (
+                    product["product_id"],
+                    product["exp_date"],
                     product["title"],
                     product["creator"],
                     product["category"],
@@ -3379,7 +3467,7 @@ class Handler(BaseHTTPRequestHandler):
         """Return the public catalogue of legitimate digital products."""
         with db() as conn:
             rows = conn.execute(
-                "SELECT id, title, creator, category, formats, license, "
+                "SELECT id, product_id, exp_date, title, creator, category, formats, license, "
                 "refund_period, country_code, price_cents, blurb, created_at "
                 "FROM expensive_products "
                 "ORDER BY created_at DESC, id DESC"
@@ -3389,6 +3477,7 @@ class Handler(BaseHTTPRequestHandler):
         for row in rows:
             product = dict(row)
             product["price"] = dollars(product.pop("price_cents"))
+            product["expDate"] = display_exp_date(product.pop("exp_date", None))
             products.append(product)
 
         return self._json(200, {"products": products})
