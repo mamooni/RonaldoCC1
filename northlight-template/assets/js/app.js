@@ -1609,7 +1609,7 @@
     if (daysAgo === 0) title = "Today";
     else if (daysAgo === 1) title = "Yesterday";
     else title = WEEKDAY[d.getUTCDay()];
-    return { title: title, date: shortDate(d), full: WEEKDAY[d.getDay()] + ", " + shortDate(d) };
+    return { title: title, date: shortDate(d), full: WEEKDAY[d.getUTCDay()] + ", " + shortDate(d) };
   }
 
   // "Today, 14:05" / "27 Oct 2026, 11:05" — shown in the detail dialog.
