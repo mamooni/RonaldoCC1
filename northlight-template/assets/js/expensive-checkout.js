@@ -30,6 +30,7 @@
 
   let checkoutItems = [];
   let currentOrderId = null;
+  let currentOrderTotal = null;
   let requestKey = null;
   let busy = false;
 
@@ -166,8 +167,31 @@
     loading.hidden = true;
   }
 
+  function updateSupportLinks(orderId, total) {
+    const amount = Number(total);
+    const amountText = Number.isFinite(amount)
+      ? " ($" + amount.toFixed(2) + ")"
+      : "";
+    const message =
+      "Hello, I need help completing premium order #" +
+      orderId +
+      amountText +
+      ".";
+
+    document.querySelectorAll("#supportSection .checkout-support-list a").forEach(function (link) {
+      const username = link.textContent.trim().replace(/^@/, "");
+      link.href =
+        "https://t.me/" +
+        encodeURIComponent(username) +
+        "?text=" +
+        encodeURIComponent(message);
+    });
+  }
+
   function showNameStep(orderId, total) {
     currentOrderId = orderId;
+    currentOrderTotal = total;
+    updateSupportLinks(orderId, total);
 
     try {
       sessionStorage.setItem(ACTIVE_ORDER_KEY, String(orderId));
@@ -225,6 +249,7 @@
         supportMessage.textContent =
           "Your order already has a customer name recorded. Contact one of our Telegram support accounts below to complete your order and receive your products.";
         supportOrderId.textContent = "Order ID: #" + order.id;
+        updateSupportLinks(order.id, order.total);
         nameSection.hidden = true;
         supportSection.hidden = false;
         loading.hidden = true;
@@ -362,6 +387,7 @@
       supportMessage.textContent =
         "Your order information has been saved. Contact one of our Telegram support accounts below to complete your order and receive your products.";
       supportOrderId.textContent = "Order ID: #" + currentOrderId;
+      updateSupportLinks(currentOrderId, currentOrderTotal);
       supportSection.hidden = false;
 
       showStatus("Your order information has been saved.");
