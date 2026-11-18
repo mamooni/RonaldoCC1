@@ -72,8 +72,10 @@
       return value.trim().toLowerCase();
     }).filter(Boolean);
   }
-  function dateKey(timestamp) {
-    const date = new Date(Number(timestamp) * 1000);
+  function dateKey(value) {
+    const raw = String(value || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const date = new Date(Number(value) * 1000);
     if (!Number.isFinite(date.getTime())) return "";
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit"
@@ -107,7 +109,7 @@
       lastWeekStart: lastWeekStart.toISOString().slice(0, 10), monthStart, previousMonth };
   }
   function groupFor(product, dates) {
-    const key = dateKey(product.created_at);
+    const key = dateKey(product.catalogue_date);
     if (!key) return "Older products";
     if (key === dates.today) return "Today";
     if (key === dates.yesterday) return "Yesterday";
