@@ -19,7 +19,7 @@
   const expiry = document.getElementById("expensiveExpiry");
   const format = document.getElementById("expensiveFormat");
   const PER_PAGE = 20;
-  let products = [], visible = [], page = 1;
+  let products = [], visible = [], page = 1, total = 0, requestToken = 0;
 
   function addCell(row, value, cls) {
     const td = document.createElement("td");
@@ -45,29 +45,21 @@
     const el = document.createElement("option");
     el.value = value; el.textContent = label; select.appendChild(el);
   }
-  function setupFilters() {
-    const cats = Array.from(new Set(products.map(p => p.category).filter(Boolean))).sort();
-    const countries = Array.from(new Set(products.map(p => p.country_code).filter(Boolean))).sort();
-    const expiryDates = Array.from(new Set(products.map(p => String(p.expDate || "").trim()).filter(v => /^\\d{2}\\/\\d{4}$/.test(v))))
-      .sort(function (a, b) {
-        const [am, ay] = a.split("/").map(Number);
-        const [bm, by] = b.split("/").map(Number);
-        return ay - by || am - bm;
-      });
-    const formats = Array.from(new Map(products.flatMap(p => String(p.formats || "").split(/[,;|]/))
-      .map(v => v.trim()).filter(Boolean).map(v => [v.toLowerCase(), v])).values()).sort(function (a, b) {
-        return a.localeCompare(b);
-      });
+  function setupFilters(facets) {
+    const keep = { category: category.value, country: country.value, expiry: expiry.value, format: format.value };
     category.replaceChildren(); option(category, "", "All categories");
-    cats.forEach(v => option(category, v, v));
+    (facets.categories || []).forEach(v => option(category, v, v));
     country.replaceChildren(); option(country, "", "All countries");
-    countries.forEach(v => option(country, v, countryLabel(v)));
+    (facets.countries || []).forEach(v => option(country, v, countryLabel(v)));
     expiry.replaceChildren(); option(expiry, "", "All expiry dates");
-    expiryDates.forEach(v => option(expiry, v, v));
+    (facets.expiries || []).forEach(v => option(expiry, v, v));
     format.replaceChildren(); option(format, "", "All formats");
-    formats.forEach(v => option(format, v.toLowerCase(), v));
+    (facets.formats || []).forEach(v => option(format, v.toLowerCase(), v));
+    if ([...category.options].some(o => o.value === keep.category)) category.value = keep.category;
+    if ([...country.options].some(o => o.value === keep.country)) country.value = keep.country;
+    if ([...expiry.options].some(o => o.value === keep.expiry)) expiry.value = keep.expiry;
+    if ([...format.options].some(o => o.value === keep.format)) format.value = keep.format;
   }
-
   function refundStatus(product) {
     const value = String(product.refund_period == null ? "" : product.refund_period).trim();
     const match = value.match(/^(\\d+(?:\\.\\d+)?)\\s*(?:days?)?$/i);
@@ -125,25 +117,8 @@
     if (key.slice(0, 7) === dates.previousMonth) return "Last month";
     return "Older products";
   }
-  function filterProducts() {
-    const q = search.value.trim().toLowerCase();
-    const minimum = minPrice.value.trim() === "" ? null : Number(minPrice.value);
-    const maximum = maxPrice.value.trim() === "" ? null : Number(maxPrice.value);
-    visible = products.filter(function (p) {
-      const haystack = [p.title, p.product_id, p.category, p.formats, p.license, p.blurb].join(" ").toLowerCase();
-      const priceValue = p.price == null || String(p.price).trim() === "" ? NaN : Number(p.price);
-      const status = refundStatus(p);
-      return (!q || haystack.includes(q)) &&
-        (!category.value || p.category === category.value) &&
-        (!country.value || p.country_code === country.value) &&
-        (minimum === null || (Number.isFinite(priceValue) && priceValue >= minimum)) &&
-        (maximum === null || (Number.isFinite(priceValue) && priceValue <= maximum)) &&
-        (!refund.value || (refund.value === "yes" ? status === true : status === false)) &&
-        (!expiry.value || String(p.expDate || "").trim() === expiry.value) &&
-        (!format.value || productFormats(p).includes(format.value));
-    });
-    page = 1; render();
-  }
+  function filterProducts() { page = 1; load(); }
+
   function button(label, cls, handler) {
     const b = document.createElement("button"); b.type = "button"; b.className = cls;
     b.textContent = label; b.addEventListener("click", handler); return b;
@@ -238,10 +213,9 @@
     }
     const ordered = [];
     groupOrder.forEach(name => grouped.get(name).forEach(product => ordered.push({ name, product })));
-    const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE));
-    page = Math.min(page, pages);
+    const pages = Math.max(1, Math.ceil(total / PER_PAGE));
     body.replaceChildren();
-    const slice = ordered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+    const slice = ordered;
     let currentGroup = "";
     slice.forEach(function (entry) {
       if (entry.name !== currentGroup) {
@@ -258,35 +232,48 @@
       }
       body.appendChild(renderRow(entry.product));
     });
-    empty.hidden = visible.length > 0;
-    pagination.hidden = visible.length <= PER_PAGE;
-    pageInfo.textContent = "Page " + page + " of " + pages;
-    prev.disabled = page === 1; next.disabled = page === pages;
+    empty.hidden = total > 0;
+    pagination.hidden = total <= PER_PAGE;
+    pageInfo.textContent = "Page " + page + " of " + pages + " · " + total + " products";
+    prev.disabled = page === 1; next.disabled = page >= pages;
   }
   async function load() {
-    loading.hidden = false; errorBox.hidden = true; empty.hidden = true; body.replaceChildren();
+    const token = ++requestToken;
+    loading.hidden = false; errorBox.hidden = true; empty.hidden = true;
+    const params = new URLSearchParams({
+      page: String(page), per_page: String(PER_PAGE), q: search.value.trim(),
+      category: category.value, country: country.value, sort: sort.value,
+      min: minPrice.value.trim(), max: maxPrice.value.trim(), refund: refund.value,
+      expiry: expiry.value, format: format.value
+    });
     try {
-      const response = await fetch("/api/expensive-products", { headers: { Accept: "application/json" } });
+      const response = await fetch("/api/expensive-products?" + params.toString(), { headers: { Accept: "application/json" } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load products.");
+      if (token !== requestToken) return;
       products = Array.isArray(data.products) ? data.products : [];
+      total = Number(data.total) || 0;
+      visible = products.slice();
+      setupFilters(data.facets || {});
       loading.hidden = true;
-      if (!products.length) { empty.hidden = false; pagination.hidden = true; return; }
-      setupFilters(); visible = products.slice(); render();
+      render();
     } catch (err) {
+      if (token !== requestToken) return;
       loading.hidden = true; errorBox.textContent = err.message || "Could not load products."; errorBox.hidden = false;
     }
   }
-  search.addEventListener("input", filterProducts);
+  let filterTimer;
+  function queueFilter() { window.clearTimeout(filterTimer); filterTimer = window.setTimeout(filterProducts, 250); }
+  search.addEventListener("input", queueFilter);
+  minPrice.addEventListener("input", queueFilter);
+  maxPrice.addEventListener("input", queueFilter);
   category.addEventListener("change", filterProducts);
   country.addEventListener("change", filterProducts);
   sort.addEventListener("change", filterProducts);
-  minPrice.addEventListener("input", filterProducts);
-  maxPrice.addEventListener("input", filterProducts);
   refund.addEventListener("change", filterProducts);
   expiry.addEventListener("change", filterProducts);
   format.addEventListener("change", filterProducts);
-  prev.addEventListener("click", function () { if (page > 1) { page--; render(); } });
-  next.addEventListener("click", function () { if (page < Math.ceil(visible.length / PER_PAGE)) { page++; render(); } });
+  prev.addEventListener("click", function () { if (page > 1) { page--; load(); } });
+  next.addEventListener("click", function () { if (page < Math.ceil(total / PER_PAGE)) { page++; load(); } });
   load();
 })();
