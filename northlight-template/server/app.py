@@ -1944,7 +1944,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/bundles":
             return self.api_bundles()
         if path == "/api/expensive-products":
-            return self.api_expensive_products()    
+            return self.api_expensive_products()
+        if path == "/api/product-check":
+            return self.api_product_check()    
         if path.startswith("/api/postcode"):
             return self.api_postcode()
         if path.startswith("/api/"):
@@ -3655,6 +3657,38 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ids": [], "count": 0})
         ids = catalogue_ids(drops + bundles)[drops:]
         return self._json(200, {"ids": ids, "count": len(ids)})
+
+
+    def api_product_check(self):
+        """Check whether a public product ID is currently listed for sale."""
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        product_id = str((params.get("id") or [""])[0]).strip().upper()
+        if not product_id or len(product_id) > 64 or not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]*", product_id):
+            return self._json(400, {"error": "Enter a valid product ID."})
+
+        # Standard goods share the exact ID catalogue used by checkout.
+        cheap = goods_catalogue().get(product_id)
+        if cheap is not None:
+            return self._json(200, {
+                "found": True, "available": True,
+                "product": {"product_id": product_id, "title": cheap["title"], "type": "Standard product"}
+            })
+
+        # Premium goods use their public product_id, not the internal database ID.
+        with db() as conn:
+            row = conn.execute(
+                "SELECT product_id, title, category FROM expensive_products "
+                "WHERE UPPER(product_id) = ? LIMIT 1",
+                (product_id,),
+            ).fetchone()
+        if row is not None:
+            return self._json(200, {
+                "found": True, "available": True,
+                "product": {"product_id": row["product_id"], "title": row["title"],
+                            "category": row["category"], "type": "Premium product"}
+            })
+        return self._json(404, {"found": False, "available": False,
+                                "error": "This product ID is not currently listed for purchase."})
 
     def api_expensive_products(self):
         """Return the public catalogue of legitimate digital products."""
