@@ -1573,15 +1573,33 @@
   var WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+  // The catalogue's displayed dates advance by one calendar day every
+  // midnight in Nigeria, while keeping each item's original day spacing.
+  // 18 Nov 2026 is the date currently represented by daysAgo: 0.
+  var DATE_BASE_UTC = Date.UTC(2026, 10, 18);
+  var DAY_MS = 24 * 60 * 60 * 1000;
+
+  function lagosCalendarDay() {
+    var parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Lagos",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    var values = {};
+    parts.forEach(function (part) {
+      if (part.type !== "literal") values[part.type] = Number(part.value);
+    });
+    return Date.UTC(values.year, values.month - 1, values.day);
+  }
+
   function dayDate(daysAgo) {
-    var d = new Date();
-    d.setHours(12, 0, 0, 0);
-    d.setDate(d.getDate() - daysAgo);
-    return d;
+    var elapsedDays = Math.floor((lagosCalendarDay() - DATE_BASE_UTC) / DAY_MS);
+    return new Date(DATE_BASE_UTC + (elapsedDays - daysAgo) * DAY_MS);
   }
 
   function shortDate(d) {
-    return d.getDate() + " " + MONTH[d.getMonth()] + " " + d.getFullYear();
+    return d.getUTCDate() + " " + MONTH[d.getUTCMonth()] + " " + d.getUTCFullYear();
   }
 
   // Heading for one day: "Today" / "Yesterday" / "Wednesday", plus the date.
@@ -1590,7 +1608,7 @@
     var title;
     if (daysAgo === 0) title = "Today";
     else if (daysAgo === 1) title = "Yesterday";
-    else title = WEEKDAY[d.getDay()];
+    else title = WEEKDAY[d.getUTCDay()];
     return { title: title, date: shortDate(d), full: WEEKDAY[d.getDay()] + ", " + shortDate(d) };
   }
 
