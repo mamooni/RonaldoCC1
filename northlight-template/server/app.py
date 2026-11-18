@@ -62,6 +62,7 @@ import urllib.error
 import threading
 import traceback
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_UP
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -704,6 +705,56 @@ def _table_columns(conn, table: str):
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
+
+
+def _lagos_catalogue_date():
+    """Return today's calendar date in Nigeria (UTC+1; no daylight saving)."""
+    return datetime.now(timezone(timedelta(hours=1))).date().isoformat()
+
+
+def _ensure_expensive_catalogue_dates(conn):
+    """Add a display-only date and backfill existing goods without touching created_at."""
+    columns = _table_columns(conn, "expensive_products")
+    if "catalogue_date" not in columns:
+        column_type = "DATE" if DB_KIND == "mysql" else "TEXT"
+        conn.execute(
+            "ALTER TABLE expensive_products ADD COLUMN catalogue_date " + column_type
+        )
+
+    if DB_KIND == "mysql":
+        index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("expensive_products", "expensive_products_catalogue_date"),
+        ).fetchone()
+        if index is None:
+            conn.execute(
+                "CREATE INDEX expensive_products_catalogue_date "
+                "ON expensive_products(catalogue_date, id)"
+            )
+    else:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS expensive_products_catalogue_date "
+            "ON expensive_products(catalogue_date, id)"
+        )
+
+    missing = conn.execute(
+        "SELECT id FROM expensive_products WHERE catalogue_date IS NULL ORDER BY id"
+    ).fetchall()
+    total = len(missing)
+    if not total:
+        return
+    first_day = date(2026, 10, 19)
+    span_days = 30
+    for index, row in enumerate(missing):
+        offset = 30 if total == 1 else (index * span_days + (total - 1) // 2) // (total - 1)
+        assigned = (first_day + timedelta(days=offset)).isoformat()
+        conn.execute(
+            "UPDATE expensive_products SET catalogue_date = ? WHERE id = ?",
+            (assigned, row["id"]),
+        )
+
+
 def _has_table(conn, name: str) -> bool:
     if DB_KIND == "mysql":
         return (
@@ -806,6 +857,7 @@ def _migrate(conn):
         "CREATE UNIQUE INDEX IF NOT EXISTS expensive_products_product_id "
         "ON expensive_products(product_id)"
     )
+    _ensure_expensive_catalogue_dates(conn)
 
     conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
     conn.executescript(AUDIT_TABLE)
@@ -942,6 +994,7 @@ def init_mysql():
             conn.execute(
                 "ALTER TABLE expensive_products ADD COLUMN exp_date DATE NULL"
             )
+        _ensure_expensive_catalogue_dates(conn)
         product_id_index = conn.execute(
             "SELECT 1 AS hit FROM information_schema.statistics "
             "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
@@ -2863,8 +2916,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = conn.execute(
                     "INSERT INTO expensive_products "
                     "(product_id, exp_date, title, creator, category, formats, license, "
-                    "refund_period, country_code, price_cents, blurb, created_at, created_by) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         product["product_id"],
                         product["exp_date"],
@@ -2879,6 +2932,7 @@ class Handler(BaseHTTPRequestHandler):
                         product["blurb"],
                         now,
                         admin["id"],
+                        _lagos_catalogue_date(),
                     ),
                 )
 
@@ -2978,14 +3032,14 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     "INSERT INTO expensive_products "
                     "(product_id, exp_date, title, creator, category, formats, license, "
-                    "refund_period, country_code, price_cents, blurb, created_at, created_by) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         product["product_id"], product["exp_date"], product["title"],
                         product["creator"], product["category"], product["formats"],
                         product["license"], product["refund_period"],
                         product["country_code"], product["price_cents"],
-                        product["blurb"], now, admin["id"],
+                        product["blurb"], now, admin["id"], _lagos_catalogue_date(),
                     ),
                 )
                 created += 1
@@ -3719,19 +3773,22 @@ class Handler(BaseHTTPRequestHandler):
         fmt = val("format").lower()
         if fmt: clauses.append("LOWER(formats) LIKE ?"); args.append("%" + fmt + "%")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        order = "created_at DESC, id DESC"
-        if val("sort") == "low-high": order = "price_cents ASC, created_at DESC, id DESC"
-        elif val("sort") == "high-low": order = "price_cents DESC, created_at DESC, id DESC"
+        order = "catalogue_date DESC, id DESC"
+        if val("sort") == "low-high": order = "price_cents ASC, catalogue_date DESC, id DESC"
+        elif val("sort") == "high-low": order = "price_cents DESC, catalogue_date DESC, id DESC"
         with db() as conn:
             total = conn.execute("SELECT COUNT(*) AS total FROM expensive_products" + where, tuple(args)).fetchone()["total"]
-            rows = conn.execute("SELECT id, product_id, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
+            rows = conn.execute("SELECT id, product_id, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at, catalogue_date FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
             cats = conn.execute("SELECT DISTINCT category FROM expensive_products WHERE category <> '' ORDER BY category").fetchall()
             countries = conn.execute("SELECT DISTINCT country_code FROM expensive_products WHERE country_code IS NOT NULL AND country_code <> '' ORDER BY country_code").fetchall()
             expiry_rows = conn.execute("SELECT DISTINCT exp_date FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY exp_date").fetchall()
             format_rows = conn.execute("SELECT formats FROM expensive_products WHERE formats <> ''").fetchall()
         products = []
         for row in rows:
-            product = dict(row); product["price"] = dollars(product.pop("price_cents")); product["expDate"] = display_exp_date(product.pop("exp_date", None)); products.append(product)
+            product = dict(row); product["price"] = dollars(product.pop("price_cents")); product["expDate"] = display_exp_date(product.pop("exp_date", None))
+            if hasattr(product.get("catalogue_date"), "isoformat"):
+                product["catalogue_date"] = product["catalogue_date"].isoformat()
+            products.append(product)
         formats = sorted({part.strip() for row in format_rows for part in re.split(r"[,;|]", row["formats"] or "") if part.strip()}, key=str.lower)
         return self._json(200, {"products": products, "total": total, "page": page, "per_page": limit, "facets": {"categories": [x["category"] for x in cats], "countries": [x["country_code"] for x in countries], "expiries": [display_exp_date(x["exp_date"]) for x in expiry_rows if x["exp_date"]], "formats": formats}})
     def api_orders(self):
