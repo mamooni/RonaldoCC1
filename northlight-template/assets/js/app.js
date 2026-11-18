@@ -1593,21 +1593,26 @@
     return Date.UTC(values.year, values.month - 1, values.day);
   }
 
+  function elapsedCatalogueDays() {
+    return Math.floor((lagosCalendarDay() - DATE_BASE_UTC) / DAY_MS);
+  }
+
   function dayDate(daysAgo) {
-    var elapsedDays = Math.floor((lagosCalendarDay() - DATE_BASE_UTC) / DAY_MS);
-    return new Date(DATE_BASE_UTC + (elapsedDays - daysAgo) * DAY_MS);
+    return new Date(DATE_BASE_UTC + (elapsedCatalogueDays() - daysAgo) * DAY_MS);
   }
 
   function shortDate(d) {
     return d.getUTCDate() + " " + MONTH[d.getUTCMonth()] + " " + d.getUTCFullYear();
   }
 
-  // Heading for one day: "Today" / "Yesterday" / "Wednesday", plus the date.
+  // Date headings follow the shifted calendar date, not the original daysAgo value.
   function dayLabel(daysAgo) {
     var d = dayDate(daysAgo);
+    var relativeDay = elapsedCatalogueDays() - daysAgo;
     var title;
-    if (daysAgo === 0) title = "Today";
-    else if (daysAgo === 1) title = "Yesterday";
+    if (relativeDay === 0) title = "Today";
+    else if (relativeDay === -1) title = "Yesterday";
+    else if (relativeDay === 1) title = "Tomorrow";
     else title = WEEKDAY[d.getUTCDay()];
     return { title: title, date: shortDate(d), full: WEEKDAY[d.getUTCDay()] + ", " + shortDate(d) };
   }
