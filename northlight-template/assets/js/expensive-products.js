@@ -13,6 +13,11 @@
   const category = document.getElementById("expensiveCategory");
   const country = document.getElementById("expensiveCountry");
   const sort = document.getElementById("expensiveSort");
+  const minPrice = document.getElementById("expensiveMinPrice");
+  const maxPrice = document.getElementById("expensiveMaxPrice");
+  const refund = document.getElementById("expensiveRefund");
+  const expiry = document.getElementById("expensiveExpiry");
+  const format = document.getElementById("expensiveFormat");
   const PER_PAGE = 20;
   let products = [], visible = [], page = 1;
 
@@ -43,17 +48,54 @@
   function setupFilters() {
     const cats = Array.from(new Set(products.map(p => p.category).filter(Boolean))).sort();
     const countries = Array.from(new Set(products.map(p => p.country_code).filter(Boolean))).sort();
+    const expiryDates = Array.from(new Set(products.map(p => String(p.expDate || "").trim()).filter(v => /^\\d{2}\\/\\d{4}$/.test(v))))
+      .sort(function (a, b) {
+        const [am, ay] = a.split("/").map(Number);
+        const [bm, by] = b.split("/").map(Number);
+        return ay - by || am - bm;
+      });
+    const formats = Array.from(new Map(products.flatMap(p => String(p.formats || "").split(/[,;|]/))
+      .map(v => v.trim()).filter(Boolean).map(v => [v.toLowerCase(), v])).values()).sort(function (a, b) {
+        return a.localeCompare(b);
+      });
     category.replaceChildren(); option(category, "", "All categories");
     cats.forEach(v => option(category, v, v));
     country.replaceChildren(); option(country, "", "All countries");
     countries.forEach(v => option(country, v, countryLabel(v)));
+    expiry.replaceChildren(); option(expiry, "", "All expiry dates");
+    expiryDates.forEach(v => option(expiry, v, v));
+    format.replaceChildren(); option(format, "", "All formats");
+    formats.forEach(v => option(format, v.toLowerCase(), v));
+  }
+
+  function refundStatus(product) {
+    const value = String(product.refund_period == null ? "" : product.refund_period).trim();
+    const match = value.match(/^(\\d+(?:\\.\\d+)?)\\s*(?:days?)?$/i);
+    if (!match) return null;
+    return Number(match[1]) > 0;
+  }
+
+  function productFormats(product) {
+    return String(product.formats || "").split(/[,;|]/).map(function (value) {
+      return value.trim().toLowerCase();
+    }).filter(Boolean);
   }
   function filterProducts() {
     const q = search.value.trim().toLowerCase();
+    const minimum = minPrice.value.trim() === "" ? null : Number(minPrice.value);
+    const maximum = maxPrice.value.trim() === "" ? null : Number(maxPrice.value);
     visible = products.filter(function (p) {
       const haystack = [p.title, p.product_id, p.category, p.formats, p.license, p.blurb].join(" ").toLowerCase();
-      return (!q || haystack.includes(q)) && (!category.value || p.category === category.value) &&
-        (!country.value || p.country_code === country.value);
+      const priceValue = p.price == null || String(p.price).trim() === "" ? NaN : Number(p.price);
+      const status = refundStatus(p);
+      return (!q || haystack.includes(q)) &&
+        (!category.value || p.category === category.value) &&
+        (!country.value || p.country_code === country.value) &&
+        (minimum === null || (Number.isFinite(priceValue) && priceValue >= minimum)) &&
+        (maximum === null || (Number.isFinite(priceValue) && priceValue <= maximum)) &&
+        (!refund.value || (refund.value === "yes" ? status === true : status === false)) &&
+        (!expiry.value || String(p.expDate || "").trim() === expiry.value) &&
+        (!format.value || productFormats(p).includes(format.value));
     });
     if (sort.value !== "default") {
       visible.sort(function (a, b) {
@@ -169,6 +211,11 @@
   category.addEventListener("change", filterProducts);
   country.addEventListener("change", filterProducts);
   sort.addEventListener("change", filterProducts);
+  minPrice.addEventListener("input", filterProducts);
+  maxPrice.addEventListener("input", filterProducts);
+  refund.addEventListener("change", filterProducts);
+  expiry.addEventListener("change", filterProducts);
+  format.addEventListener("change", filterProducts);
   prev.addEventListener("click", function () { if (page > 1) { page--; render(); } });
   next.addEventListener("click", function () { if (page < Math.ceil(visible.length / PER_PAGE)) { page++; render(); } });
   load();
