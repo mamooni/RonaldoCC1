@@ -192,7 +192,12 @@
           <select class="select select--block" id="expensiveCountry"><option value="">All countries</option></select>
         </label>
       </div>
-      <div class="results__scroll expensive-table-scroll">
+      <div class="expensive-scroll-cue" aria-label="Table scrolling instructions">
+        <span class="expensive-scroll-cue__icon" aria-hidden="true">↔</span>
+        <span><strong>More product details</strong> — swipe or scroll horizontally to see all columns.</span>
+        <span class="expensive-scroll-cue__arrows" aria-hidden="true">← →</span>
+      </div>
+      <div class="results__scroll expensive-table-scroll" tabindex="0" role="region" aria-label="Premium products table. Scroll horizontally to view all product details.">
         <table class="rtable expensive-table">
           <thead><tr><th>Product</th><th>Category</th><th>Country</th><th>ID</th><th>Format</th><th>Licence</th><th>Expiry</th><th>Price</th><th class="is-numeric">Action</th></tr></thead>
           <tbody id="expensiveProducts"></tbody>
