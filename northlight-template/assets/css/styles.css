@@ -5643,3 +5643,70 @@ button.menu__item {
 .product-check-result__details { font-weight: 650; }
 .product-check-footnote { margin-top: 16px; color: var(--text-mute); font-size: 12.5px; }
 @media (max-width: 560px) { .product-check-panel { padding: 20px; } .product-check-form { flex-direction: column; } .product-check-form .btn { width: 100%; justify-content: center; } }
+
+
+/* Admin console refresh — colourful, readable, and scoped to admin.html */
+.page--admin {
+  padding-top: 28px;
+  padding-bottom: 56px;
+  background:
+    radial-gradient(ellipse at 4% 0%, rgba(66, 133, 244, .09), transparent 34%),
+    radial-gradient(ellipse at 96% 8%, rgba(145, 82, 210, .08), transparent 30%),
+    var(--page-bg, #f6f7fb);
+}
+.page--admin .admin__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 24px 26px; margin-bottom: 20px;
+  border: 1px solid rgba(91,111,155,.16); border-radius: 18px;
+  background: linear-gradient(118deg,#fff 0%,#f4f7ff 58%,#fbf5ff 100%);
+  box-shadow: 0 12px 32px rgba(35,48,78,.07);
+}
+.page--admin .admin__title { margin:0 0 6px; color:#18243a; font-size:clamp(25px,3vw,34px); letter-spacing:-.035em; }
+.page--admin .admin__sub { color:#68758b; line-height:1.55; }
+.page--admin .admin__stamp { padding:7px 11px; border:1px solid #dce5f7; border-radius:999px; background:#edf3ff; color:#355b9a; font-size:11px; font-weight:750; }
+.page--admin .admin__refresh { border:1px solid #d7e0f0; border-radius:9px; background:#f1f5ff; color:#315b9c; font-weight:700; transition:transform .16s ease,box-shadow .16s ease,background .16s ease; }
+.page--admin .admin__refresh:hover:not(:disabled) { transform:translateY(-1px); background:#e7efff; box-shadow:0 5px 14px rgba(48,91,156,.12); }
+.page--admin .astats { gap:14px; margin:0 0 22px; }
+.page--admin .astat { position:relative; overflow:hidden; min-height:112px; padding:18px 19px; border:1px solid #e4e9f2; border-radius:15px; background:linear-gradient(145deg,#fff,#f5f8ff); box-shadow:0 8px 22px rgba(35,48,78,.045); }
+.page--admin .astat::after { position:absolute; right:-18px; bottom:-30px; width:88px; height:88px; border-radius:50%; background:var(--admin-tint,rgba(67,111,210,.09)); content:""; }
+.page--admin .astat:nth-child(1) { --admin-tint:rgba(62,119,220,.13); border-top:3px solid #4d82d8; }
+.page--admin .astat--amber { --admin-tint:rgba(231,166,48,.16); border-top:3px solid #e5a52f; background:linear-gradient(145deg,#fff,#fff9ed); }
+.page--admin .astat--green { --admin-tint:rgba(35,164,112,.14); border-top:3px solid #28a477; background:linear-gradient(145deg,#fff,#effaf5); }
+.page--admin .astat--red { --admin-tint:rgba(219,75,91,.13); border-top:3px solid #d95a68; background:linear-gradient(145deg,#fff,#fff3f4); }
+.page--admin .astat:nth-child(5) { --admin-tint:rgba(139,91,204,.14); border-top:3px solid #9062c8; background:linear-gradient(145deg,#fff,#f8f3ff); }
+.page--admin .astat__label { position:relative; z-index:1; color:#6b7890; font-size:12px; font-weight:650; }
+.page--admin .astat__value { position:relative; z-index:1; margin-top:8px; color:#1d2a42; font-size:clamp(23px,2.3vw,29px); font-weight:800; letter-spacing:-.03em; }
+.page--admin .admin__block { margin:0 0 20px; padding:21px; border:1px solid #e4e9f2; border-radius:16px; background:rgba(255,255,255,.96); box-shadow:0 8px 24px rgba(35,48,78,.045); }
+.page--admin .admin__section { margin-top:0; color:#24334e; font-weight:780; letter-spacing:-.015em; }
+.page--admin .admin__scroll { border:1px solid #e9edf4; border-radius:11px; background:#fff; }
+.page--admin .atable th { background:#f3f6fc; color:#596982; font-weight:750; }
+.page--admin .atable tbody tr:nth-child(even) { background:#fbfcff; }
+.page--admin .atable tbody tr:hover { background:#f1f6ff; }
+.page--admin .admin__note { padding:11px 14px; border:1px solid #d9e8fb; border-radius:10px; background:#eff6ff; color:#285b98; font-weight:650; }
+.page--admin #expensiveProductsAdmin { border-top:4px solid #8a65c7; background:linear-gradient(155deg,#fff 0%,#fff 72%,#faf6ff 100%); }
+.page--admin #expensiveProductsAdmin > .admin__section { color:#6845a3; }
+.page--admin #expensiveProductsAdmin .admin__product-form { border-color:#e3dcf2; background:linear-gradient(145deg,#fff,#faf8ff); }
+.page--admin #expensiveProductsAdmin .admin__product-form input,
+.page--admin #expensiveProductsAdmin .admin__product-form select,
+.page--admin #expensiveProductsAdmin .admin__product-form textarea { border-color:#dce2ee; background:#fff; color:#25334a; }
+.page--admin #expensiveProductsAdmin .admin__product-form input:focus,
+.page--admin #expensiveProductsAdmin .admin__product-form select:focus,
+.page--admin #expensiveProductsAdmin .admin__product-form textarea:focus { outline:3px solid rgba(125,91,190,.14); border-color:#9270c8; }
+.page--admin #expensiveProductsAdmin .admin__product-delete { border-color:#f0cbd0; background:#fff0f1; color:#b42336; }
+.page--admin #expensiveProductsAdmin .admin__product-delete:hover:not(:disabled) { border-color:#df8792; background:#ffe2e5; box-shadow:0 5px 14px rgba(180,35,54,.12); }
+.page--admin #expensiveProductsAdmin .admin__product-edit { border-color:#d9e2f8; background:#edf3ff; color:#315b9c; }
+.page--admin #expensiveProductsAdmin #importExpensiveDraft { border:1px solid #d9c9f2; border-radius:9px; background:#f3edff; color:#7049aa; font-weight:750; }
+.page--admin #expensiveProductsAdmin #saveExpensiveProducts,
+.page--admin #expensiveProductsAdmin #saveEditedExpensiveProduct { border-color:#237c60; background:linear-gradient(135deg,#258d69,#176b56); color:#fff; }
+.page--admin #expensiveProductsAdmin #addProductSlot { border-color:#cbdcf7; background:#eef5ff; color:#315b9c; }
+@media (max-width:700px) {
+  .page--admin { padding-top:16px; }
+  .page--admin .admin__head { align-items:flex-start; flex-direction:column; padding:19px; }
+  .page--admin .admin__tools { width:100%; flex-wrap:wrap; }
+  .page--admin .astats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .page--admin .admin__block { padding:15px; }
+}
+@media (max-width:420px) {
+  .page--admin .astats { grid-template-columns:1fr 1fr; gap:9px; }
+  .page--admin .astat { min-height:96px; padding:14px; }
+}
