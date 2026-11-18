@@ -1620,7 +1620,7 @@
   // "Today, 14:05" / "27 Oct 2026, 11:05" — shown in the detail dialog.
   function addedLabel(item) {
     var label = dayLabel(item.daysAgo);
-    var prefix = item.daysAgo === 0 ? "Today" : item.daysAgo === 1 ? "Yesterday" : label.date;
+    var prefix = /^(Today|Yesterday|Tomorrow)$/.test(label.title) ? label.title : label.date;
     return prefix + ", " + item.time;
   }
 
