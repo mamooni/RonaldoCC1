@@ -160,17 +160,21 @@
     editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  async function deleteProduct(productId, button) {
-    if (!productId) return;
+  async function deleteProduct(product, button) {
+    if (!product || !product.id) return;
 
+    const productLabel = product.title || product.product_id || "this product";
+    const publicId = product.product_id ? " (" + product.product_id + ")" : "";
     const confirmed = window.confirm(
-      "Are you sure you want to delete this product? This cannot be undone."
+      "Delete “" + productLabel + "”" + publicId + "?\\n\\n" +
+      "This permanently removes the premium product from the catalogue and cannot be undone. " +
+      "Existing customer order records are not deleted."
     );
 
     if (!confirmed) return;
 
     button.disabled = true;
-    showNote("Deleting product…", false);
+    showNote("Deleting " + productLabel + "…", false);
 
     try {
       const response = await fetch(
@@ -180,7 +184,7 @@
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ id: productId })
+          body: JSON.stringify({ id: product.id })
         }
       );
 
@@ -190,13 +194,13 @@
         throw new Error(data.error || "Could not delete product.");
       }
 
-      if (editingProductId === productId) {
+      if (editingProductId === product.id) {
         editForm.reset();
         editingProductId = null;
         editPanel.hidden = true;
       }
 
-      showNote("Product deleted successfully.", false);
+      showNote("“" + productLabel + "” was deleted successfully.", false);
       await loadProducts();
     } catch (error) {
       showNote(error.message || "Could not delete product.", true);
@@ -233,7 +237,7 @@
 
       const editButton = document.createElement("button");
       editButton.type = "button";
-      editButton.className = "admin__refresh";
+      editButton.className = "admin__refresh admin__product-edit";
       editButton.textContent = "Edit";
       editButton.addEventListener("click", function () {
         openEditProduct(product);
@@ -241,10 +245,10 @@
 
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.className = "admin__refresh";
+      deleteButton.className = "admin__refresh admin__product-delete";
       deleteButton.textContent = "Delete";
       deleteButton.addEventListener("click", function () {
-        deleteProduct(product.id, deleteButton);
+        deleteProduct(product, deleteButton);
       });
 
       actions.appendChild(editButton);
