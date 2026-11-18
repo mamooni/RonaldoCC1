@@ -5558,3 +5558,51 @@ button.menu__item {
 .expensive-actions { display:flex; justify-content:flex-end; gap:7px; }
 .expensive-actions button { padding:7px 10px; font-size:12px; white-space:nowrap; }
 @media (max-width:650px) { .expensive-filters { grid-template-columns:1fr; } }
+
+
+/* Premium catalogue: keep the cheap-products page's storefront styling. */
+.page--expensive { padding-top:14px; padding-bottom:40px; }
+.page--expensive .expensive-catalogue {
+  padding:22px 24px 24px; border-radius:var(--radius);
+  background:var(--surface); border:1px solid var(--border);
+}
+.page--expensive .expensive-filters {
+  display:grid; grid-template-columns:minmax(220px,2fr) minmax(160px,1fr) minmax(160px,1fr);
+  gap:14px; margin:0 0 18px;
+}
+.page--expensive .expensive-filters label {
+  display:flex; flex-direction:column; gap:0; color:var(--text-dim);
+}
+.page--expensive .expensive-filters input,
+.page--expensive .expensive-filters select {
+  height:38px; padding:0 12px; border:1px solid var(--border);
+  border-radius:var(--radius-sm); background:var(--surface-2);
+  color:var(--text); font:inherit; font-size:12.5px;
+}
+.page--expensive .expensive-table-scroll {
+  border:0; border-radius:0; border-top:1px solid var(--border-soft);
+}
+.page--expensive .expensive-table {
+  min-width:1200px; font-size:11.5px; color:var(--text-dim);
+}
+.page--expensive .expensive-table th {
+  padding:10px 8px; color:var(--text-mute); font-size:11.5px;
+  font-weight:500; background:transparent; border-bottom:1px solid var(--border-soft);
+}
+.page--expensive .expensive-table td {
+  padding:12px 8px; line-height:1.5; border-bottom:1px solid var(--border-soft);
+}
+.page--expensive .expensive-table th + th,
+.page--expensive .expensive-table td + td { border-left:1px solid var(--border-soft); }
+.page--expensive .expensive-table tbody tr:hover td { background:#fbfcfd; }
+.page--expensive .expensive-table .product-name {
+  min-width:190px; color:var(--text); font-size:12px;
+}
+.page--expensive .expensive-actions { gap:7px; }
+.page--expensive .expensive-actions button { padding:7px 10px; font-size:12px; }
+.page--expensive .expensive-pagination { margin:18px 0 0; gap:10px; }
+.page--expensive .expensive-pagination span { color:var(--text-mute); font-size:12px; }
+@media (max-width:650px) {
+  .page--expensive .expensive-catalogue { padding:16px 14px; }
+  .page--expensive .expensive-filters { grid-template-columns:1fr; gap:12px; }
+}
