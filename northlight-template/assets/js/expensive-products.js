@@ -64,7 +64,29 @@
     const row = document.createElement("tr");
     addCell(row, p.title, "product-name");
     addBadgeCell(row, p.category, "expensive-chip expensive-chip--category");
-    addBadgeCell(row, countryLabel(p.country_code), "expensive-chip expensive-chip--country");
+    const countryCell = document.createElement("td");
+    const countryWrap = document.createElement("span");
+    countryWrap.className = "expensive-country";
+    const countryName = countryLabel(p.country_code);
+    const countryCode = String(p.country_code || "").trim().toLowerCase();
+    if (/^[a-z]{2}$/.test(countryCode)) {
+      const flag = document.createElement("img");
+      flag.className = "expensive-country__flag";
+      flag.src = "https://flagcdn.com/w40/" + countryCode + ".png";
+      flag.alt = countryName + " flag";
+      flag.width = 20;
+      flag.height = 15;
+      flag.loading = "lazy";
+      flag.decoding = "async";
+      flag.addEventListener("error", function () { flag.remove(); }, { once: true });
+      countryWrap.appendChild(flag);
+    }
+    const countryText = document.createElement("span");
+    countryText.className = "expensive-country__name";
+    countryText.textContent = countryName;
+    countryWrap.appendChild(countryText);
+    countryCell.appendChild(countryWrap);
+    row.appendChild(countryCell);
     addBadgeCell(row, p.product_id, "expensive-chip expensive-chip--id");
     addBadgeCell(row, p.formats, "expensive-chip expensive-chip--format");
     addBadgeCell(row, p.license, "expensive-chip expensive-chip--licence");
