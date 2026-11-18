@@ -197,41 +197,31 @@
     const dates = dateGroups();
     const groupOrder = ["Today", "Yesterday", "Earlier this week", "Last week",
       "Earlier this month", "Last month", "Older products"];
-    const grouped = new Map(groupOrder.map(name => [name, []]));
-    visible.forEach(function (product) { grouped.get(groupFor(product, dates)).push(product); });
-    if (sort.value !== "default") {
-      grouped.forEach(function (items) {
-        items.sort(function (a, b) {
-          const av = Number(a.price), bv = Number(b.price);
-          const aValid = a.price != null && String(a.price).trim() !== "" && Number.isFinite(av);
-          const bValid = b.price != null && String(b.price).trim() !== "" && Number.isFinite(bv);
-          if (aValid !== bValid) return aValid ? -1 : 1;
-          if (!aValid) return 0;
-          return sort.value === "low-high" ? av - bv : bv - av;
-        });
-      });
-    }
-    const ordered = [];
-    groupOrder.forEach(name => grouped.get(name).forEach(product => ordered.push({ name, product })));
-    const pages = Math.max(1, Math.ceil(total / PER_PAGE));
     body.replaceChildren();
-    const slice = ordered;
-    let currentGroup = "";
-    slice.forEach(function (entry) {
-      if (entry.name !== currentGroup) {
+    if (sort.value !== "default") {
+      // The API has already sorted the complete filtered result before pagination.
+      // Do not regroup here, or date buckets would break the global price order.
+      visible.forEach(function (product) { body.appendChild(renderRow(product)); });
+    } else {
+      const grouped = new Map(groupOrder.map(name => [name, []]));
+      visible.forEach(function (product) { grouped.get(groupFor(product, dates)).push(product); });
+      let currentGroup = "";
+      groupOrder.forEach(function (name) {
+        const items = grouped.get(name);
+        if (!items.length) return;
         const heading = document.createElement("tr");
         heading.className = "expensive-date-group";
         const cell = document.createElement("th");
         cell.colSpan = 10;
         cell.scope = "rowgroup";
-        cell.textContent = entry.name + " · " + grouped.get(entry.name).length + " product" +
-          (grouped.get(entry.name).length === 1 ? "" : "s");
+        cell.textContent = name + " · " + items.length + " product" + (items.length === 1 ? "" : "s");
         heading.appendChild(cell);
         body.appendChild(heading);
-        currentGroup = entry.name;
-      }
-      body.appendChild(renderRow(entry.product));
-    });
+        items.forEach(function (product) { body.appendChild(renderRow(product)); });
+        currentGroup = name;
+      });
+    }
+    const pages = Math.max(1, Math.ceil(total / PER_PAGE));
     empty.hidden = total > 0;
     pagination.hidden = total <= PER_PAGE;
     pageInfo.textContent = "Page " + page + " of " + pages + " · " + total + " products";
