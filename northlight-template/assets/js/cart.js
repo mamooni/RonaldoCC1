@@ -25,6 +25,9 @@
 
   var KEY = "nl.cart.v1";
   var ORDERS_KEY = "nl.orders.v1";
+  var CHECKOUT_KEY = "nl.checkout.pending.v1";
+  var pendingCheckoutKey = "";
+  var pendingCartSignature = "";
 
   /* ---------------------------------------------------------------- money -- */
 
@@ -207,6 +210,70 @@
     return li;
   }
 
+  function setNote(message, tone) {
+    var note = document.getElementById("summaryNote");
+    if (!note) return;
+    if (!message) {
+      note.hidden = true;
+      note.textContent = "";
+      return;
+    }
+    note.hidden = false;
+    note.className = "summary__note summary__note--" + (tone || "warn");
+    note.textContent = message;
+  }
+
+  function checkoutRequestKey(items) {
+    var signature = JSON.stringify(items.map(function (item) {
+      return { id: item.key, quantity: item.qty };
+    }).sort(function (a, b) { return a.id.localeCompare(b.id); }));
+    if (pendingCheckoutKey && pendingCartSignature === signature) return pendingCheckoutKey;
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(CHECKOUT_KEY) || "null");
+      if (saved && saved.signature === signature && /^[0-9a-f]{32}$/.test(saved.key)) {
+        pendingCheckoutKey = saved.key;
+        pendingCartSignature = signature;
+        return pendingCheckoutKey;
+      }
+    } catch (err) {}
+    var bytes = new Uint8Array(16);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    pendingCheckoutKey = Array.prototype.map.call(bytes, function (byte) {
+      return byte.toString(16).padStart(2, "0");
+    }).join("");
+    pendingCartSignature = signature;
+    try {
+      window.localStorage.setItem(CHECKOUT_KEY, JSON.stringify({
+        key: pendingCheckoutKey, signature: signature
+      }));
+    } catch (err) {}
+    return pendingCheckoutKey;
+  }
+
+  function clearCheckoutRequestKey() {
+    pendingCheckoutKey = "";
+    pendingCartSignature = "";
+    try { window.localStorage.removeItem(CHECKOUT_KEY); } catch (err) {}
+  }
+
+  function recordCompletedOrder(order) {
+    try {
+      var orders = JSON.parse(window.localStorage.getItem(ORDERS_KEY) || "[]");
+      if (!Array.isArray(orders)) orders = [];
+      orders.push({
+        id: order.id, at: order.created_at * 1000, total: order.total,
+        items: (order.items || []).reduce(function (n, item) { return n + item.quantity; }, 0),
+      });
+      window.localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+    } catch (err) {
+      /* local activity stats are optional; the server order is authoritative */
+    }
+  }
+
   function initPage() {
     var list = document.getElementById("cartList");
     var empty = document.getElementById("cartEmpty");
@@ -218,58 +285,82 @@
 
     paint = function () {
       var items = read();
-
       list.innerHTML = "";
       for (var i = 0; i < items.length; i++) list.appendChild(row(items[i]));
-
       var isEmpty = items.length === 0;
       list.hidden = isEmpty;
       if (empty) empty.hidden = !isEmpty;
-
       totalEl.textContent = money(sum());
+      confirm.disabled = isEmpty;
     };
 
     list.addEventListener("click", function (event) {
       var btn = event.target.closest("[data-remove]");
       if (!btn) return;
       remove(btn.getAttribute("data-remove"));
-      if (note) note.hidden = true; // a stale message no longer applies
+      setNote("", null);
     });
 
     confirm.addEventListener("click", function () {
-      if (read().length === 0) {
-        if (!note) return;
-        note.hidden = false;
-        note.className = "summary__note summary__note--warn";
-        note.textContent = "Your cart is empty — add something from the store first.";
-        return;
-      }
+      var items = read();
+      if (!items.length || confirm.disabled) return;
+      var requestKey = checkoutRequestKey(items);
+      confirm.disabled = true;
+      confirm.textContent = "Processing…";
+      setNote("Checking product prices and your wallet balance…", "warn");
 
-      // Remember the order before the cart is emptied: Settings reads this
-      // list for its "Orders" and "Total Spent" figures.
-      var placedAt = Date.now();
-      var placedTotal = sum();
-      var placedItems = read().reduce(function (n, item) {
-        return n + item.qty;
-      }, 0);
-
-      clear();
-
-      try {
-        var orders = JSON.parse(window.localStorage.getItem(ORDERS_KEY) || "[]");
-        if (!Array.isArray(orders)) orders = [];
-        orders.push({ at: placedAt, total: placedTotal, items: placedItems });
-        window.localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
-      } catch (err) {
-        /* storage blocked — the order simply is not recorded */
-      }
-
-      if (note) {
-        note.hidden = false;
-        note.className = "summary__note summary__note--ok";
-        note.textContent =
-          "Order confirmed. We are Experiencing a technical issue right now, try again later";
-      }
+      fetch("api/cheap-product-checkout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_key: requestKey,
+          items: items.map(function (item) {
+            return { id: item.key, quantity: item.qty };
+          }),
+        }),
+      })
+        .then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (data) {
+            return { status: response.status, data: data };
+          });
+        })
+        .then(function (result) {
+          var data = result.data || {};
+          if ((result.status === 201 || result.status === 200) && data.order) {
+            Array.prototype.forEach.call(document.querySelectorAll(".js-balance"), function (node) {
+              node.textContent = Number(data.balance || 0).toFixed(2);
+            });
+            recordCompletedOrder(data.order);
+            clearCheckoutRequestKey();
+            clear();
+            confirm.textContent = "Paid successfully";
+            setNote(
+              "Order #" + data.order.id + " confirmed. " +
+              money(data.order.total) + " was deducted from your wallet.",
+              "ok"
+            );
+            return;
+          }
+          var message = data.error || "We could not complete checkout. Your cart has been kept.";
+          if (result.status === 402) {
+            message = "Insufficient wallet balance. Required: " + money(data.total) +
+              ". Available: " + money(data.balance) + ". Still needed: " +
+              money(data.missing) + ". Your cart is safe — add funds and try again.";
+          } else if (result.status === 401) {
+            message = "Your session has expired. Sign in again; your cart will remain here.";
+          }
+          confirm.disabled = false;
+          confirm.textContent = "Pay from Wallet";
+          setNote(message, "warn");
+        })
+        .catch(function () {
+          // Retain the request key; if the server completed the charge but the
+          // response was lost, retrying safely returns the same order.
+          confirm.disabled = false;
+          confirm.textContent = "Retry Payment";
+          setNote("We could not confirm the result. Your cart is still here. Retry safely; the same checkout will not charge twice.", "warn");
+        });
     });
 
     paint();
