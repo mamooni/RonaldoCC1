@@ -80,6 +80,51 @@
       return value.trim().toLowerCase();
     }).filter(Boolean);
   }
+  function dateKey(timestamp) {
+    const date = new Date(Number(timestamp) * 1000);
+    if (!Number.isFinite(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(date);
+  }
+  function dateGroups() {
+    const today = dateKey(Date.now() / 1000);
+    const now = new Date();
+    const weekday = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Sun" ? 0 : new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Mon" ? 1 : new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Tue" ? 2 : new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Wed" ? 3 : new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Thu" ? 4 : new Intl.DateTimeFormat("en-US", {
+      timeZone: "Africa/Lagos", weekday: "short"
+    }).format(now) === "Fri" ? 5 : 6);
+    const todayDate = new Date(today + "T12:00:00Z");
+    const dayMs = 86400000;
+    const yesterday = new Date(todayDate.getTime() - dayMs).toISOString().slice(0, 10);
+    const weekStart = new Date(todayDate.getTime() - weekday * dayMs);
+    const lastWeekStart = new Date(weekStart.getTime() - 7 * dayMs);
+    const monthStart = today.slice(0, 7) + "-01";
+    const previousMonthDate = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 2, 1));
+    const previousMonth = previousMonthDate.toISOString().slice(0, 7);
+    return { today, yesterday, weekStart: weekStart.toISOString().slice(0, 10),
+      lastWeekStart: lastWeekStart.toISOString().slice(0, 10), monthStart, previousMonth };
+  }
+  function groupFor(product, dates) {
+    const key = dateKey(product.created_at);
+    if (!key) return "Older products";
+    if (key === dates.today) return "Today";
+    if (key === dates.yesterday) return "Yesterday";
+    if (key >= dates.weekStart) return "Earlier this week";
+    if (key >= dates.lastWeekStart) return "Last week";
+    if (key >= dates.monthStart) return "Earlier this month";
+    if (key.slice(0, 7) === dates.previousMonth) return "Last month";
+    return "Older products";
+  }
   function filterProducts() {
     const q = search.value.trim().toLowerCase();
     const minimum = minPrice.value.trim() === "" ? null : Number(minPrice.value);
@@ -97,16 +142,6 @@
         (!expiry.value || String(p.expDate || "").trim() === expiry.value) &&
         (!format.value || productFormats(p).includes(format.value));
     });
-    if (sort.value !== "default") {
-      visible.sort(function (a, b) {
-        const aValid = a.price != null && String(a.price).trim() !== "" && Number.isFinite(Number(a.price));
-        const bValid = b.price != null && String(b.price).trim() !== "" && Number.isFinite(Number(b.price));
-        if (aValid !== bValid) return aValid ? -1 : 1;
-        if (!aValid) return 0;
-        const difference = Number(a.price) - Number(b.price);
-        return sort.value === "low-high" ? difference : -difference;
-      });
-    }
     page = 1; render();
   }
   function button(label, cls, handler) {
@@ -184,10 +219,45 @@
     row.appendChild(actions); return row;
   }
   function render() {
-    const pages = Math.max(1, Math.ceil(visible.length / PER_PAGE));
+    const dates = dateGroups();
+    const groupOrder = ["Today", "Yesterday", "Earlier this week", "Last week",
+      "Earlier this month", "Last month", "Older products"];
+    const grouped = new Map(groupOrder.map(name => [name, []]));
+    visible.forEach(function (product) { grouped.get(groupFor(product, dates)).push(product); });
+    if (sort.value !== "default") {
+      grouped.forEach(function (items) {
+        items.sort(function (a, b) {
+          const av = Number(a.price), bv = Number(b.price);
+          const aValid = a.price != null && String(a.price).trim() !== "" && Number.isFinite(av);
+          const bValid = b.price != null && String(b.price).trim() !== "" && Number.isFinite(bv);
+          if (aValid !== bValid) return aValid ? -1 : 1;
+          if (!aValid) return 0;
+          return sort.value === "low-high" ? av - bv : bv - av;
+        });
+      });
+    }
+    const ordered = [];
+    groupOrder.forEach(name => grouped.get(name).forEach(product => ordered.push({ name, product })));
+    const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE));
     page = Math.min(page, pages);
     body.replaceChildren();
-    visible.slice((page - 1) * PER_PAGE, page * PER_PAGE).forEach(p => body.appendChild(renderRow(p)));
+    const slice = ordered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+    let currentGroup = "";
+    slice.forEach(function (entry) {
+      if (entry.name !== currentGroup) {
+        const heading = document.createElement("tr");
+        heading.className = "expensive-date-group";
+        const cell = document.createElement("th");
+        cell.colSpan = 10;
+        cell.scope = "rowgroup";
+        cell.textContent = entry.name + " · " + grouped.get(entry.name).length + " product" +
+          (grouped.get(entry.name).length === 1 ? "" : "s");
+        heading.appendChild(cell);
+        body.appendChild(heading);
+        currentGroup = entry.name;
+      }
+      body.appendChild(renderRow(entry.product));
+    });
     empty.hidden = visible.length > 0;
     pagination.hidden = visible.length <= PER_PAGE;
     pageInfo.textContent = "Page " + page + " of " + pages;
