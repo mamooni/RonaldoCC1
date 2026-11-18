@@ -69,6 +69,28 @@
     addBadgeCell(row, p.formats, "expensive-chip expensive-chip--format");
     addBadgeCell(row, p.license, "expensive-chip expensive-chip--licence");
     addBadgeCell(row, p.expDate, "expensive-chip expensive-chip--expiry");
+    const refundCell = document.createElement("td");
+    const refundBadge = document.createElement("span");
+    const refundText = String(p.refund_period == null ? "" : p.refund_period).trim();
+    const refundMatch = refundText.match(/^(\d+(?:\.\d+)?)\s*(?:days?)?$/i);
+    if (refundMatch) {
+      const refundDays = Number(refundMatch[1]);
+      if (refundDays > 0) {
+        refundBadge.className = "expensive-refund expensive-refund--yes";
+        refundBadge.textContent = "✓ Refundable";
+        refundBadge.setAttribute("aria-label", "Refundable for " + refundDays + " days");
+      } else {
+        refundBadge.className = "expensive-refund expensive-refund--no";
+        refundBadge.textContent = "✕ Not refundable";
+        refundBadge.setAttribute("aria-label", "Not refundable");
+      }
+    } else {
+      refundBadge.className = "expensive-refund expensive-refund--unknown";
+      refundBadge.textContent = "Not specified";
+      refundBadge.setAttribute("aria-label", "Refund period not specified");
+    }
+    refundCell.appendChild(refundBadge);
+    row.appendChild(refundCell);
     const price = Number(p.price);
     addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "expensive-price is-numeric");
     const actions = document.createElement("td"); actions.className = "is-numeric";
