@@ -12,6 +12,7 @@
   const search = document.getElementById("expensiveSearch");
   const category = document.getElementById("expensiveCategory");
   const country = document.getElementById("expensiveCountry");
+  const sort = document.getElementById("expensiveSort");
   const PER_PAGE = 20;
   let products = [], visible = [], page = 1;
 
@@ -54,6 +55,16 @@
       return (!q || haystack.includes(q)) && (!category.value || p.category === category.value) &&
         (!country.value || p.country_code === country.value);
     });
+    if (sort.value !== "default") {
+      visible.sort(function (a, b) {
+        const aValid = a.price != null && String(a.price).trim() !== "" && Number.isFinite(Number(a.price));
+        const bValid = b.price != null && String(b.price).trim() !== "" && Number.isFinite(Number(b.price));
+        if (aValid !== bValid) return aValid ? -1 : 1;
+        if (!aValid) return 0;
+        const difference = Number(a.price) - Number(b.price);
+        return sort.value === "low-high" ? difference : -difference;
+      });
+    }
     page = 1; render();
   }
   function button(label, cls, handler) {
@@ -157,6 +168,7 @@
   search.addEventListener("input", filterProducts);
   category.addEventListener("change", filterProducts);
   country.addEventListener("change", filterProducts);
+  sort.addEventListener("change", filterProducts);
   prev.addEventListener("click", function () { if (page > 1) { page--; render(); } });
   next.addEventListener("click", function () { if (page < Math.ceil(visible.length / PER_PAGE)) { page++; render(); } });
   load();
