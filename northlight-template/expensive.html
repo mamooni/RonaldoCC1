@@ -14,82 +14,108 @@
 
 <body data-requires-auth>
 
-  <header class="topbar">
-    <div class="topbar__inner">
-      <a class="topbar__logo" href="index.html" aria-label="Home">
-        <img src="logo.png" alt="Northlight" class="topbar__logo-img" />
-      </a>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <!-- ===== LOGO (left) ==================================================
+             Replace the dashed placeholder below with your own image:
 
-      <div class="topbar__center">
-        <a href="index.html" class="topbar__brand">Northlight</a>
-      </div>
+                 <img src="logo.png" alt="Your store" class="topbar__logo-img" />
 
-      <div class="topbar__right">
-        <div class="menu" data-menu>
-          <button
-            class="avatar"
-            type="button"
-            aria-haspopup="true"
-            aria-expanded="false"
-            aria-controls="accountMenu"
-          >
-            SU
-          </button>
+             PNG or SVG, any shape. It is centred vertically and scaled to fit
+             the header height (--header-height in styles.css).
+             ================================================================== -->
+        <a class="topbar__logo" href="index.html" aria-label="Home">
 
-          <div
-            class="menu__panel menu__panel--account menu__panel--right"
-            id="accountMenu"
-            hidden
-          >
-            <div class="acct__head" data-user>
-              <p class="acct__name" id="menuUsername">search.user</p>
-              <p class="acct__email" id="menuEmail">
-                search.user@example.com
-              </p>
-            </div>
+        <img src="logo.png" alt="Your store" class="topbar__logo-img" />
 
-            <a class="acct__item" href="settings.html" data-user>
-              <span>My Account</span>
-            </a>
 
-            <a class="acct__item" href="activity.html" data-user>
-              <span>Your Activities</span>
-            </a>
+        <!-- ===== CENTRE: balance + wallet ================================== -->
+        <div class="topbar__center">
+          <a class="wallet" href="deposit.html" aria-label="Wallet balance">
+            <span class="wallet__cur">$</span>
+            <span class="js-balance">0.00</span>
+          </a>
+          <a class="btn btn--wallet" href="deposit.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+            </svg>
+            <span class="btn__label">Wallet</span>
+          </a>
+        </div>
 
-            <a class="acct__item" href="support.html" data-user>
-              <span>Support</span>
-            </a>
+        <!-- ===== RIGHT: messages, cart, profile ============================ -->
+        <div class="topbar__actions">
+          <a class="icon-btn" href="messages.html" aria-label="Messages">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v2.2l8 5 8-5V6H4Zm16 5.9-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 11.9V18h16v-6.1Z"/>
+            </svg>
+          </a>
 
-            <button
-              class="acct__item"
-              type="button"
-              id="signOutBtn"
-              data-user
-            >
-              <span>Sign out</span>
-            </button>
+          <a class="icon-btn" href="expensive-cart.html" aria-label="Shopping cart" id="expensiveCartBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M7 4a3 3 0 0 1 10 0h2.5a1 1 0 0 1 1 .9l1 12A2 2 0 0 1 19.5 19h-15a2 2 0 0 1-2-2.1l1-12a1 1 0 0 1 1-.9H7Zm2 0h6a1 1 0 0 0-2-2h-2a1 1 0 0 0-2 2Z"/>
+            </svg>
+            <span class="badge" id="expensiveCartCount" hidden>0</span>
+          </a>
 
-            <a
-              class="acct__item acct__item--admin"
-              href="admin.html"
-              data-admin
+          <div class="menu" data-menu>
+            <button class="avatar" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu">SU</button>
+            <div
+              class="menu__panel menu__panel--account menu__panel--right"
+              id="accountMenu"
               hidden
             >
-              <span>Admin</span>
-            </a>
+              <!-- who is signed in: name, then the address on file -->
+              <div class="acct__head" data-user>
+                <p class="acct__name" id="menuUsername">search.user</p>
+                <p class="acct__email" id="menuEmail">search.user@example.com</p>
+              </div>
 
-            <a class="acct__item" href="login.html" data-guest hidden>
-              <span>Sign in</span>
-            </a>
+              <a class="acct__item" href="settings.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+                <span>My Account</span>
+              </a>
 
-            <a class="acct__item" href="signup.html" data-guest hidden>
-              <span>Create account</span>
-            </a>
+              <a class="acct__item" href="activity.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.6v5"/><path d="M12 16.2h.01"/></svg>
+                <span>Your Activities</span>
+              </a>
+
+              <a class="acct__item" href="#" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0"/><path d="M16.5 5.4a3.2 3.2 0 0 1 0 5.9"/><path d="M18 13.6a6.2 6.2 0 0 1 3.2 5.9"/></svg>
+                <span>Referral Program</span>
+              </a>
+
+              <a class="acct__item" href="support.html" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.4a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.1-2.5 3.9"/><path d="M12 17.2h.01"/></svg>
+                <span>Support</span>
+              </a>
+
+              <button class="acct__item" type="button" id="signOutBtn" data-user>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16.5 5.5 12 10 7.5"/><path d="M5.5 12H15"/></svg>
+                <span>Sign out</span>
+              </button>
+
+              <a class="acct__item acct__item--admin" href="admin.html" data-admin hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6Z"/><path d="m9 12 2 2 4-4"/></svg>
+                <span>Admin</span>
+              </a>
+
+              <!-- shown only when signed out -->
+              <a class="acct__item" href="login.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M14 16.5 18.5 12 14 7.5"/><path d="M18.5 12H9"/></svg>
+                <span>Sign in</span>
+              </a>
+
+              <a class="acct__item" href="signup.html" data-guest hidden>
+                <svg class="acct__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="8" r="3.4"/><path d="M3 20a7 7 0 0 1 12.2-4.7"/><path d="M18 14.2v5.6"/><path d="M15.2 17h5.6"/></svg>
+                <span>Create account</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  </header>
+    </header>
 
   <nav class="subnav" aria-label="Sections">
     <div class="subnav__inner">
@@ -146,51 +172,36 @@
     </div>
   </nav>
 
-  <main class="page page--expensive">
-    <section class="expensive-header">
-      <h1>Expensive Products</h1>
-      <p>
-        Explore premium digital products, creative resources,
-        and licensed digital assets.
-      </p>
-    </section>
-
-    <section
-      class="expensive-catalogue"
-      aria-label="Premium digital products"
-    >
-      <p id="expensiveLoading" role="status">
-        Loading products...
-      </p>
-
+  <main class="page page--search page--expensive">
+    <h1 class="search__title">Expensive Products</h1>
+    <section class="filters expensive-catalogue" aria-label="Premium digital products">
+      <p id="expensiveLoading" role="status">Loading products...</p>
       <p id="expensiveError" role="alert" hidden></p>
-
-      <p id="expensiveEmpty" hidden>
-        No products have been added yet. Please check back later.
-      </p>
-
-      <div class="expensive-filters" aria-label="Filter products">
-        <label><span>Search products</span><input id="expensiveSearch" type="search" placeholder="Search name or product ID" /></label>
-        <label><span>Category</span><select id="expensiveCategory"><option value="">All categories</option></select></label>
-        <label><span>Country</span><select id="expensiveCountry"><option value="">All countries</option></select></label>
+      <p id="expensiveEmpty" class="results__empty" hidden>No products have been added yet. Please check back later.</p>
+      <div class="expensive-filters">
+        <label class="field-sm">
+          <span class="field-sm__label">Search products</span>
+          <input class="input-sm" id="expensiveSearch" type="search" placeholder="Search name or product ID" />
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Category</span>
+          <select class="select select--block" id="expensiveCategory"><option value="">All categories</option></select>
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Country</span>
+          <select class="select select--block" id="expensiveCountry"><option value="">All countries</option></select>
+        </label>
       </div>
-      <div class="expensive-table-scroll">
-        <table class="expensive-table">
-          <thead><tr><th>Product</th><th>Category</th><th>Country</th><th>ID</th><th>Format</th><th>Licence</th><th>Expiry</th><th class="is-numeric">Price</th><th class="is-numeric">Action</th></tr></thead>
+      <div class="results__scroll expensive-table-scroll">
+        <table class="rtable expensive-table">
+          <thead><tr><th>Product</th><th>Category</th><th>Country</th><th>ID</th><th>Format</th><th>Licence</th><th>Expiry</th><th>Price</th><th class="is-numeric">Action</th></tr></thead>
           <tbody id="expensiveProducts"></tbody>
         </table>
       </div>
-
       <div class="expensive-pagination" id="expensivePagination" hidden>
-        <button type="button" id="previousPage" disabled>
-          Previous
-        </button>
-
+        <button class="btn btn--secondary" type="button" id="previousPage" disabled>Previous</button>
         <span id="pageInfo">Page 1 of 1</span>
-
-        <button type="button" id="nextPage" disabled>
-          Next
-        </button>
+        <button class="btn btn--secondary" type="button" id="nextPage" disabled>Next</button>
       </div>
     </section>
   </main>
