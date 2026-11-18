@@ -3846,8 +3846,11 @@ class Handler(BaseHTTPRequestHandler):
                     "FROM cheap_product_order_items WHERE order_id = ? ORDER BY id",
                     (previous["id"],),
                 ).fetchall()
-                expected = sorted((x["goods_id"], x["price_cents"], x["quantity"]) for x in items)
-                actual = sorted((x["goods_id"], x["price_cents"], x["quantity"]) for x in previous_items)
+                # Compare the cart identity, not today's catalogue price:
+                # a price edit after a successful but unacknowledged payment must
+                # not prevent the customer from retrieving the original receipt.
+                expected = sorted((x["goods_id"], x["quantity"]) for x in items)
+                actual = sorted((x["goods_id"], x["quantity"]) for x in previous_items)
                 if expected != actual:
                     return self._json(409, {"error": "This checkout request was already used for a different cart. Refresh and try again."})
                 balance_row = conn.execute(
