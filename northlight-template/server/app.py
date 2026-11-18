@@ -3691,24 +3691,49 @@ class Handler(BaseHTTPRequestHandler):
                                 "error": "This product ID is not currently listed for purchase."})
 
     def api_expensive_products(self):
-        """Return the public catalogue of legitimate digital products."""
+        """Return a filtered, paginated public catalogue."""
+        params = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        def val(name, default=""):
+            return (params.get(name) or [default])[0].strip()
+        try:
+            page = max(1, int(val("page", "1"))); limit = min(100, max(1, int(val("per_page", "20"))))
+        except ValueError: return self._error(400, "Invalid catalogue page.")
+        clauses, args = [], []
+        q = val("q").lower()
+        if q:
+            clauses.append("(LOWER(title) LIKE ? OR LOWER(product_id) LIKE ? OR LOWER(category) LIKE ? OR LOWER(formats) LIKE ? OR LOWER(license) LIKE ? OR LOWER(blurb) LIKE ?)"); args.extend(["%" + q + "%"] * 6)
+        for key, col in (("category", "category"), ("country", "country_code")):
+            v = val(key)
+            if v: clauses.append(col + " = ?"); args.append(v)
+        for key, op in (("min", ">="), ("max", "<=")):
+            v = val(key)
+            if v:
+                try: cents = int((Decimal(v) * 100).quantize(Decimal("1")))
+                except (InvalidOperation, ValueError): return self._error(400, "Invalid price filter.")
+                clauses.append("price_cents " + op + " ?"); args.append(cents)
+        if val("refund") == "yes": clauses.append("CAST(refund_period AS REAL) > 0")
+        elif val("refund") == "no": clauses.append("CAST(refund_period AS REAL) <= 0")
+        expiry = val("expiry")
+        if re.fullmatch(r"\d{2}/\d{4}", expiry):
+            mm, yyyy = expiry.split("/"); clauses.append("substr(exp_date, 6, 2) = ? AND substr(exp_date, 1, 4) = ?"); args.extend([mm, yyyy])
+        fmt = val("format").lower()
+        if fmt: clauses.append("LOWER(formats) LIKE ?"); args.append("%" + fmt + "%")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        order = "created_at DESC, id DESC"
+        if val("sort") == "low-high": order = "price_cents ASC, created_at DESC, id DESC"
+        elif val("sort") == "high-low": order = "price_cents DESC, created_at DESC, id DESC"
         with db() as conn:
-            rows = conn.execute(
-                "SELECT id, product_id, exp_date, title, creator, category, formats, license, "
-                "refund_period, country_code, price_cents, blurb, created_at "
-                "FROM expensive_products "
-                "ORDER BY created_at DESC, id DESC"
-            ).fetchall()
-
+            total = conn.execute("SELECT COUNT(*) AS total FROM expensive_products" + where, tuple(args)).fetchone()["total"]
+            rows = conn.execute("SELECT id, product_id, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
+            cats = conn.execute("SELECT DISTINCT category FROM expensive_products WHERE category <> '' ORDER BY category").fetchall()
+            countries = conn.execute("SELECT DISTINCT country_code FROM expensive_products WHERE country_code IS NOT NULL AND country_code <> '' ORDER BY country_code").fetchall()
+            expiry_rows = conn.execute("SELECT DISTINCT substr(exp_date, 6, 2) || '/' || substr(exp_date, 1, 4) AS expiry FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY substr(exp_date, 1, 7)").fetchall()
+            format_rows = conn.execute("SELECT formats FROM expensive_products WHERE formats <> ''").fetchall()
         products = []
         for row in rows:
-            product = dict(row)
-            product["price"] = dollars(product.pop("price_cents"))
-            product["expDate"] = display_exp_date(product.pop("exp_date", None))
-            products.append(product)
-
-        return self._json(200, {"products": products})
-
+            product = dict(row); product["price"] = dollars(product.pop("price_cents")); product["expDate"] = display_exp_date(product.pop("exp_date", None)); products.append(product)
+        formats = sorted({part.strip() for row in format_rows for part in re.split(r"[,;|]", row["formats"] or "") if part.strip()}, key=str.lower)
+        return self._json(200, {"products": products, "total": total, "page": page, "per_page": limit, "facets": {"categories": [x["category"] for x in cats], "countries": [x["country_code"] for x in countries], "expiries": [x["expiry"] for x in expiry_rows if x["expiry"]], "formats": formats}})
     def api_orders(self):
         """The signed-in account's purchases, newest first."""
         user = self._current_user()
