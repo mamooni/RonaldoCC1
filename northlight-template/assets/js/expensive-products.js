@@ -22,6 +22,15 @@
     row.appendChild(td);
     return td;
   }
+  function addBadgeCell(row, value, cls) {
+    const td = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = cls;
+    badge.textContent = value == null || value === "" ? "—" : String(value);
+    td.appendChild(badge);
+    row.appendChild(td);
+    return td;
+  }
   function countryLabel(code) {
     const found = (window.NL_COUNTRIES || []).find(function (item) { return item.code === code; });
     return found ? found.name : (code || "—");
@@ -53,11 +62,15 @@
   }
   function renderRow(p) {
     const row = document.createElement("tr");
-    addCell(row, p.title, "product-name"); addCell(row, p.category);
-    addCell(row, countryLabel(p.country_code)); addCell(row, p.product_id);
-    addCell(row, p.formats); addCell(row, p.license); addCell(row, p.expDate);
+    addCell(row, p.title, "product-name");
+    addBadgeCell(row, p.category, "expensive-chip expensive-chip--category");
+    addBadgeCell(row, countryLabel(p.country_code), "expensive-chip expensive-chip--country");
+    addBadgeCell(row, p.product_id, "expensive-chip expensive-chip--id");
+    addBadgeCell(row, p.formats, "expensive-chip expensive-chip--format");
+    addBadgeCell(row, p.license, "expensive-chip expensive-chip--licence");
+    addBadgeCell(row, p.expDate, "expensive-chip expensive-chip--expiry");
     const price = Number(p.price);
-    addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "is-numeric");
+    addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "expensive-price is-numeric");
     const actions = document.createElement("td"); actions.className = "is-numeric";
     const actionGroup = document.createElement("div"); actionGroup.className = "expensive-actions";
     actionGroup.appendChild(button("Buy", "btn btn--primary", function () {
