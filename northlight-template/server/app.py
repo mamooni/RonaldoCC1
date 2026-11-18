@@ -585,6 +585,30 @@ CREATE TABLE IF NOT EXISTS purchases (
 );
 CREATE INDEX IF NOT EXISTS purchases_user ON purchases(user_id, id);
 """
+
+CHEAP_PRODUCT_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS cheap_product_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS cheap_product_orders_user ON cheap_product_orders(user_id, id);
+
+CREATE TABLE IF NOT EXISTS cheap_product_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES cheap_product_orders(id) ON DELETE CASCADE,
+    goods_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    UNIQUE (order_id, goods_id)
+);
+CREATE INDEX IF NOT EXISTS cheap_product_order_items_order ON cheap_product_order_items(order_id);
+"""
+
 EXPENSIVE_PRODUCTS_TABLE = """
 CREATE TABLE IF NOT EXISTS expensive_products (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -769,6 +793,7 @@ def _migrate(conn):
 
     conn.executescript(PAYMENTS_TABLE)
     conn.executescript(PURCHASES_TABLE)
+    conn.executescript(CHEAP_PRODUCT_ORDERS_TABLE)
     conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
 
     # Add catalogue fields to existing SQLite databases without rebuilding rows.
@@ -856,6 +881,8 @@ MYSQL_TABLES = (
     "sessions",
     "payments",
     "purchases",
+    "cheap_product_orders",
+    "cheap_product_order_items",
     "expensive_products",
     "expensive_product_orders",
     "expensive_product_order_items",
@@ -869,6 +896,33 @@ def init_mysql():
     """Keep MySQL honest: the tables come from database/northlight.sql."""
     conn = _mysql_connect()
     try:
+        # Additive migration for existing MySQL/TiDB databases.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cheap_product_orders ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "user_id INT UNSIGNED NOT NULL, request_key CHAR(32) NOT NULL, "
+            "total_cents BIGINT NOT NULL, created_at BIGINT NOT NULL, "
+            "UNIQUE KEY cheap_orders_request (user_id, request_key), "
+            "KEY cheap_orders_user (user_id, id), "
+            "CONSTRAINT cheap_orders_user_fk FOREIGN KEY (user_id) "
+            "REFERENCES users(id) ON DELETE CASCADE, "
+            "CONSTRAINT cheap_orders_total_positive CHECK (total_cents > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cheap_product_order_items ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "order_id BIGINT UNSIGNED NOT NULL, goods_id VARCHAR(16) NOT NULL, "
+            "title VARCHAR(190) NOT NULL, price_cents BIGINT NOT NULL, "
+            "quantity INT UNSIGNED NOT NULL, "
+            "UNIQUE KEY cheap_order_product (order_id, goods_id), "
+            "KEY cheap_order_items_order (order_id), "
+            "CONSTRAINT cheap_order_items_order_fk FOREIGN KEY (order_id) "
+            "REFERENCES cheap_product_orders(id) ON DELETE CASCADE, "
+            "CONSTRAINT cheap_order_items_price_positive CHECK (price_cents > 0), "
+            "CONSTRAINT cheap_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
         missing = [t for t in MYSQL_TABLES if not _has_table(conn, t)]
         if missing:
             raise SystemExit(
@@ -1599,6 +1653,7 @@ POST_ROUTES = {
     "/api/payment-sent": "api_report_payment",
     "/api/payment-cancel": "api_cancel_payment",
     "/api/purchase": "api_purchase",
+    "/api/cheap-product-checkout": "api_cheap_product_checkout",
     "/api/expensive-product-checkout": "api_expensive_product_checkout",
     "/api/expensive-product-name": "api_expensive_product_name",
     "/api/admin/payment": "api_admin_payment",
@@ -2472,6 +2527,18 @@ class Handler(BaseHTTPRequestHandler):
                 "ORDER BY p.id DESC"
             ).fetchall()
 
+            cheap_order_rows = conn.execute(
+                "SELECT o.id, o.user_id, u.username, o.total_cents, o.created_at "
+                "FROM cheap_product_orders o JOIN users u ON u.id = o.user_id "
+                "ORDER BY o.id DESC LIMIT 200"
+            ).fetchall()
+            cheap_item_rows = conn.execute(
+                "SELECT i.order_id, i.title, i.price_cents, i.quantity "
+                "FROM cheap_product_order_items i WHERE i.order_id IN ("
+                "SELECT id FROM cheap_product_orders ORDER BY id DESC LIMIT 200"
+                ") ORDER BY i.id"
+            ).fetchall()
+
             expensive_order_rows = conn.execute(
                 "SELECT o.id, o.user_id, u.username, o.total_cents, "
                 "o.full_name, o.status, o.created_at "
@@ -2490,6 +2557,21 @@ class Handler(BaseHTTPRequestHandler):
                 ") "
                 "ORDER BY i.id"
             ).fetchall()
+
+        cheap_items_by_order = {}
+        for item in cheap_item_rows:
+            cheap_items_by_order.setdefault(item["order_id"], []).append({
+                "title": item["title"], "price": dollars(item["price_cents"]),
+                "quantity": item["quantity"],
+            })
+        cheap_orders = []
+        for order in cheap_order_rows:
+            cheap_orders.append({
+                "id": order["id"], "user_id": order["user_id"],
+                "username": order["username"], "total": dollars(order["total_cents"]),
+                "status": "paid", "created_at": order["created_at"],
+                "items": cheap_items_by_order.get(order["id"], []),
+            })
 
         expensive_items_by_order = {}
 
@@ -2565,6 +2647,7 @@ class Handler(BaseHTTPRequestHandler):
             "stats": stats,
             "users": users,
             "payments": payments,
+            "cheap_orders": cheap_orders,
             "expensive_orders": expensive_orders,
         })
 
@@ -3706,7 +3789,133 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
-    
+
+    def api_cheap_product_checkout(self, payload):
+        """Atomically charge the wallet and create a retry-safe multi-item order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+
+        request_key = str(payload.get("request_key") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{32}", request_key):
+            return self._json(400, {"error": "Invalid checkout request. Refresh the cart and try again."})
+        submitted = payload.get("items")
+        if not isinstance(submitted, list) or not submitted or len(submitted) > 30:
+            return self._json(400, {"error": "Your cart is empty or contains too many different products."})
+
+        catalogue = goods_catalogue()
+        quantities = {}
+        for entry in submitted:
+            if not isinstance(entry, dict):
+                return self._json(400, {"error": "One of the cart items is invalid."})
+            goods_id = str(entry.get("id") or "").strip()
+            quantity = entry.get("quantity", 1)
+            if (not goods_id or isinstance(quantity, bool) or not isinstance(quantity, int)
+                    or quantity < 1 or quantity > 99):
+                return self._json(400, {"error": "A cart item has an invalid quantity or product ID."})
+            if goods_id not in catalogue:
+                return self._json(409, {"error": "A product in your cart is no longer available. Remove it and refresh the catalogue."})
+            quantities[goods_id] = quantities.get(goods_id, 0) + quantity
+            if quantities[goods_id] > 99:
+                return self._json(400, {"error": "A product quantity cannot exceed 99."})
+
+        items, total_cents = [], 0
+        for goods_id, quantity in quantities.items():
+            product = catalogue[goods_id]
+            items.append({
+                "goods_id": goods_id, "title": product["title"],
+                "price_cents": product["price_cents"], "quantity": quantity,
+            })
+            total_cents += product["price_cents"] * quantity
+        if total_cents <= 0:
+            return self._json(400, {"error": "The checkout total is invalid."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            # A lost response can be retried with the same key without a second debit.
+            previous = conn.execute(
+                "SELECT id, total_cents, created_at FROM cheap_product_orders "
+                "WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone()
+            if previous is not None:
+                previous_items = conn.execute(
+                    "SELECT goods_id, title, price_cents, quantity "
+                    "FROM cheap_product_order_items WHERE order_id = ? ORDER BY id",
+                    (previous["id"],),
+                ).fetchall()
+                expected = sorted((x["goods_id"], x["price_cents"], x["quantity"]) for x in items)
+                actual = sorted((x["goods_id"], x["price_cents"], x["quantity"]) for x in previous_items)
+                if expected != actual:
+                    return self._json(409, {"error": "This checkout request was already used for a different cart. Refresh and try again."})
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
+                return self._json(200, {
+                    "duplicate": True,
+                    "balance": dollars(balance_row["balance_cents"] if balance_row else 0),
+                    "order": {
+                        "id": previous["id"], "total": dollars(previous["total_cents"]),
+                        "created_at": previous["created_at"], "status": "paid",
+                        "items": [{
+                            "goods_id": x["goods_id"], "title": x["title"],
+                            "price": dollars(x["price_cents"]), "quantity": x["quantity"],
+                        } for x in previous_items],
+                    },
+                })
+
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (total_cents, user["id"], total_cents),
+            )
+            if paid.rowcount != 1:
+                row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
+                balance = row["balance_cents"] if row is not None else 0
+                return self._json(402, {
+                    "error": "Insufficient funds.", "balance": dollars(balance),
+                    "total": dollars(total_cents),
+                    "missing": dollars(max(0, total_cents - balance)),
+                })
+
+            cursor = conn.execute(
+                "INSERT INTO cheap_product_orders "
+                "(user_id, request_key, total_cents, created_at) VALUES (?, ?, ?, ?)",
+                (user["id"], request_key, total_cents, now),
+            )
+            order_id = cursor.lastrowid
+            for item in items:
+                conn.execute(
+                    "INSERT INTO cheap_product_order_items "
+                    "(order_id, goods_id, title, price_cents, quantity) VALUES (?, ?, ?, ?, ?)",
+                    (order_id, item["goods_id"], item["title"], item["price_cents"], item["quantity"]),
+                )
+            balance_row = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+            ).fetchone()
+            balance = balance_row["balance_cents"] if balance_row is not None else 0
+            audit(
+                conn, "cheap_purchase", actor=user, target=str(order_id),
+                detail=f"{len(items)} product line(s), total {dollars(total_cents):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(201, {
+            "order": {
+                "id": order_id, "total": dollars(total_cents),
+                "created_at": now, "status": "paid",
+                "items": [{
+                    "goods_id": item["goods_id"], "title": item["title"],
+                    "price": dollars(item["price_cents"]), "quantity": item["quantity"],
+                } for item in items],
+            },
+            "balance": dollars(balance),
+        })
+
     def api_expensive_product_checkout(self, payload):
         """Charge the wallet and create an order for legitimate digital products."""
         user = self._current_user()
