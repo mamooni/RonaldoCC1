@@ -5749,3 +5749,20 @@ button.menu__item {
   background:#f0f2f6;
   border-color:#e1e5ec;
 }
+
+
+/* Customer premium catalogue — date-added group headings */
+.page--expensive .expensive-table tbody tr.expensive-date-group th {
+  padding: 13px 12px;
+  border-top: 2px solid var(--accent, #d81f30);
+  border-bottom: 1px solid var(--border-soft, #e6e9ef);
+  background: linear-gradient(90deg, rgba(216,31,48,.09), rgba(47,109,246,.035));
+  color: var(--text, #202938);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .025em;
+  text-align: left;
+}
+.page--expensive .expensive-table tbody tr.expensive-date-group:first-child th {
+  border-top: 0;
+}
