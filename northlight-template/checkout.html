@@ -3,10 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6fa">
   <title>Premium Checkout — Northlight</title>
   <link rel="stylesheet" href="assets/css/styles.css">
+  <style>
+    .checkout-page { width:min(100% - 32px, 900px); margin:0 auto; padding:46px 0 72px; }
+    .checkout-heading { margin:0 0 26px; }
+    .checkout-eyebrow { display:inline-flex; align-items:center; gap:8px; margin:0 0 10px; color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+    .checkout-eyebrow::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+    .checkout-heading h1 { margin:0 0 8px; font-size:clamp(27px,4vw,36px); letter-spacing:-.04em; }
+    .checkout-heading p { color:var(--text-mute); font-size:14px; }
+    .checkout-shell { overflow:hidden; border:1px solid var(--border); border-radius:20px; background:var(--surface); box-shadow:var(--shadow-lg); }
+    .checkout-topline { height:4px; background:linear-gradient(90deg,#bd1726,#ed6874 55%,#f4c1c6); }
+    .checkout-content { padding:clamp(22px,5vw,42px); }
+    .checkout-steps { display:flex; align-items:center; gap:10px; margin:0 0 30px; color:var(--text-mute); font-size:12px; font-weight:700; }
+    .checkout-step { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+    .checkout-step__number { display:grid; width:25px; height:25px; place-items:center; border:1px solid var(--border); border-radius:50%; background:var(--surface-2); color:var(--text-mute); font-size:11px; }
+    .checkout-step.is-current { color:var(--text); }
+    .checkout-step.is-current .checkout-step__number { border-color:var(--accent); background:var(--accent); color:#fff; }
+    .checkout-step__line { flex:1; min-width:12px; height:1px; background:var(--border); }
+    .checkout-section-title { margin:0 0 7px; font-size:21px; letter-spacing:-.025em; }
+    .checkout-muted { margin:0 0 22px; color:var(--text-mute); font-size:13.5px; }
+    #checkoutItems { display:grid; gap:10px; margin:18px 0; padding:0; list-style:none; }
+    #checkoutItems li { display:flex; justify-content:space-between; gap:16px; padding:13px 15px; border:1px solid var(--border-soft); border-radius:11px; background:var(--surface-2); font-size:14px; font-weight:600; }
+    #checkoutTotal { margin:0 0 20px; padding:14px 15px; border-radius:11px; background:var(--surface-2); color:var(--text-dim); font-size:13px; }
+    .checkout-primary { display:inline-flex; width:100%; min-height:50px; align-items:center; justify-content:center; border:0; border-radius:11px; background:linear-gradient(135deg,#df2d40,#b91425); color:#fff; font:inherit; font-size:14px; font-weight:800; cursor:pointer; box-shadow:0 8px 18px rgba(204,21,38,.2); transition:transform .16s ease,filter .16s ease; }
+    .checkout-primary:hover:not(:disabled) { filter:brightness(1.06); transform:translateY(-1px); }
+    .checkout-primary:disabled { opacity:.6; cursor:wait; transform:none; }
+    .checkout-form { display:grid; gap:9px; max-width:520px; margin-top:22px; }
+    .checkout-form label { color:var(--text-dim); font-size:13px; font-weight:700; }
+    .checkout-form input { width:100%; min-height:49px; padding:0 14px; border:1px solid var(--border); border-radius:10px; outline:none; background:#fff; color:var(--text); font:inherit; transition:border-color .15s,box-shadow .15s; }
+    .checkout-form input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+    .checkout-trust { display:flex; flex-wrap:wrap; gap:14px; margin-top:22px; padding-top:18px; border-top:1px solid var(--border-soft); color:var(--text-mute); font-size:11.5px; }
+    .checkout-trust span { display:inline-flex; align-items:center; gap:6px; }
+    .checkout-trust span::before { content:"✓"; display:grid; width:17px; height:17px; place-items:center; border-radius:50%; background:#e8f7ee; color:#17734a; font-size:10px; font-weight:900; }
+    #checkoutError { margin:0 0 18px; padding:12px 14px; border:1px solid #f3c8ce; border-radius:10px; background:#fff2f3; color:#a7192b; font-size:13px; }
+    #checkoutStatus { margin:18px 0 0; padding:12px 14px; border:1px solid #c9e9d6; border-radius:10px; background:#f0faf4; color:#176b43; font-size:13px; }
+    .checkout-support-intro { margin:0 0 18px; color:var(--text-mute); font-size:14px; line-height:1.7; }
+    .checkout-order-id { display:inline-flex; margin:0 0 24px; padding:10px 14px; border:1px dashed #d6a0a6; border-radius:9px; background:#fff7f7; color:#a7192b; font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
+    .checkout-support-list { display:grid; gap:10px; margin:14px 0 24px; padding:0; list-style:none; }
+    .checkout-support-list a { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:12px; padding:0 15px; border:1px solid var(--border); border-radius:11px; background:var(--surface-2); color:var(--text); font-size:14px; font-weight:700; transition:border-color .15s,background .15s; }
+    .checkout-support-list a::after { content:"Open Telegram ↗"; color:var(--accent); font-size:11px; font-weight:800; }
+    .checkout-support-list a:hover { border-color:#e4a1a8; background:#fff8f8; }
+    .checkout-back { display:inline-flex; align-items:center; justify-content:center; min-height:43px; padding:0 16px; border:1px solid var(--border); border-radius:9px; color:var(--text-dim); font-size:13px; font-weight:700; }
+    .checkout-back:hover { border-color:var(--accent); color:var(--accent); }
+    @media(max-width:560px) { .checkout-page { width:min(100% - 22px,900px); padding:28px 0 44px; } .checkout-content { padding:21px 17px; } .checkout-steps { gap:6px; font-size:10px; } .checkout-step { gap:5px; } .checkout-step__number { width:22px; height:22px; } .checkout-trust { gap:9px; } }
+    @media(prefers-reduced-motion:reduce) { .checkout-primary,.checkout-form input,.checkout-support-list a { transition:none; } }
+  </style>
 </head>
-
 <body data-requires-auth>
   <header class="topbar">
     <div class="topbar__inner">
@@ -22,65 +66,65 @@
     </div>
   </header>
 
-  <main class="page">
-    <section class="panel">
-      <h1>Premium Product Checkout</h1>
-      <p>Payment will be taken from your Northlight wallet.</p>
+  <main class="checkout-page">
+    <div class="checkout-heading">
+      <div class="checkout-eyebrow">Northlight secure checkout</div>
+      <h1>Complete your order</h1>
+      <p>Review your premium products and complete your purchase using your Northlight wallet.</p>
+    </div>
 
-      <div id="checkoutLoading" role="status">
-        Preparing your checkout...
+    <section class="checkout-shell" aria-label="Premium product checkout">
+      <div class="checkout-topline"></div>
+      <div class="checkout-content">
+        <div class="checkout-steps" aria-label="Checkout progress">
+          <div class="checkout-step is-current"><span class="checkout-step__number">1</span><span>Payment</span></div>
+          <span class="checkout-step__line"></span>
+          <div class="checkout-step"><span class="checkout-step__number">2</span><span>Your details</span></div>
+          <span class="checkout-step__line"></span>
+          <div class="checkout-step"><span class="checkout-step__number">3</span><span>Support</span></div>
+        </div>
+
+        <div id="checkoutLoading" role="status" class="checkout-muted">Preparing your checkout...</div>
+        <div id="checkoutError" role="alert" hidden></div>
+
+        <div id="checkoutSummary" hidden>
+          <h2 class="checkout-section-title">Order summary</h2>
+          <p class="checkout-muted">Check the items below before paying. Your wallet will only be charged when you press the payment button.</p>
+          <ul id="checkoutItems"></ul>
+          <p id="checkoutTotal">Final price will be calculated securely by Northlight.</p>
+          <button class="checkout-primary" id="payButton" type="button">Pay with Northlight Wallet</button>
+        </div>
+
+        <section id="nameSection" hidden>
+          <h2 class="checkout-section-title">Payment successful</h2>
+          <p class="checkout-muted">Your purchase has been recorded. Enter your full name to continue.</p>
+          <form id="customerNameForm" class="checkout-form">
+            <label for="customerFullName">Full name</label>
+            <input id="customerFullName" name="full_name" type="text" maxlength="120" autocomplete="name" placeholder="Enter your full name" required>
+            <button class="checkout-primary" id="nameSubmit" type="submit">Continue to support</button>
+          </form>
+        </section>
+
+        <section id="supportSection" hidden>
+          <h2 class="checkout-section-title">Your order is recorded</h2>
+          <p id="supportMessage" class="checkout-support-intro">Your purchase has been recorded. Contact one of our Telegram support accounts below to complete your order and receive your products.</p>
+          <p id="supportOrderId" class="checkout-order-id" aria-live="polite"></p>
+          <h3 class="checkout-section-title" style="font-size:16px">Choose a Telegram support account</h3>
+          <ul class="checkout-support-list">
+            <li><a href="https://t.me/Ronaldosupport1" target="_blank" rel="noopener noreferrer">@Ronaldosupport1</a></li>
+            <li><a href="https://t.me/Ronaldosupp" target="_blank" rel="noopener noreferrer">@Ronaldosupp</a></li>
+            <li><a href="https://t.me/Rippedjews" target="_blank" rel="noopener noreferrer">@Rippedjews</a></li>
+          </ul>
+          <a class="checkout-back" href="expensive.html">Return to premium products</a>
+        </section>
+
+        <div class="checkout-trust">
+          <span>Secure wallet payment</span>
+          <span>Order ID provided</span>
+          <span>Telegram support available</span>
+        </div>
+        <p id="checkoutStatus" role="status" aria-live="polite" hidden></p>
       </div>
-
-      <div id="checkoutError" role="alert" hidden></div>
-
-      <div id="checkoutSummary" hidden>
-        <h2>Order Summary</h2>
-        <ul id="checkoutItems"></ul>
-        <p id="checkoutTotal">
-          Final price will be calculated securely by Northlight.
-        </p>
-        <button class="btn btn--primary" id="payButton" type="button">
-          Pay with Wallet
-        </button>
-      </div>
-
-      <section id="nameSection" hidden>
-        <h2>Payment successful</h2>
-        <p>Your purchase has been recorded. Enter your full name to continue.</p>
-
-        <form id="customerNameForm">
-          <label for="customerFullName">Full name</label>
-          <input
-            id="customerFullName"
-            name="full_name"
-            type="text"
-            maxlength="120"
-            autocomplete="name"
-            required
-          >
-          <button class="btn btn--primary" id="nameSubmit" type="submit">
-            Submit Name
-          </button>
-        </form>
-      </section>
-
-      <section id="supportSection" hidden>
-        <h2>You're all set</h2>
-        <p id="supportMessage">
-          Your purchase has been recorded. Contact one of our Telegram support
-          accounts below to complete your order and receive your products.
-        </p>
-        <p id="supportOrderId" aria-live="polite"></p>
-        <h3>Choose a Telegram support account</h3>
-        <ul>
-          <li><a href="https://t.me/Ronaldosupport1" target="_blank" rel="noopener noreferrer">@Ronaldosupport1</a></li>
-          <li><a href="https://t.me/Ronaldosupp" target="_blank" rel="noopener noreferrer">@Ronaldosupp</a></li>
-          <li><a href="https://t.me/Rippedjews" target="_blank" rel="noopener noreferrer">@Rippedjews</a></li>
-        </ul>
-        <a class="tab" href="expensive.html">Return to Products</a>
-      </section>
-
-      <p id="checkoutStatus" role="status" aria-live="polite" hidden></p>
     </section>
   </main>
 
