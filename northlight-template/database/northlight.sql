@@ -115,6 +115,40 @@ CREATE TABLE IF NOT EXISTS `purchases` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- Cheap product checkout orders
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `cheap_product_orders` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id` INT UNSIGNED NOT NULL,
+    `request_key` CHAR(32) NOT NULL,
+    `total_cents` BIGINT NOT NULL,
+    `created_at` BIGINT NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `cheap_orders_request` (`user_id`, `request_key`),
+    KEY `cheap_orders_user` (`user_id`, `id`),
+    CONSTRAINT `cheap_orders_user_fk` FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `cheap_orders_total_positive` CHECK (`total_cents` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `cheap_product_order_items` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `order_id` BIGINT UNSIGNED NOT NULL,
+    `goods_id` VARCHAR(16) NOT NULL,
+    `title` VARCHAR(190) NOT NULL,
+    `price_cents` BIGINT NOT NULL,
+    `quantity` INT UNSIGNED NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `cheap_order_product` (`order_id`, `goods_id`),
+    KEY `cheap_order_items_order` (`order_id`),
+    CONSTRAINT `cheap_order_items_order_fk`
+        FOREIGN KEY (`order_id`) REFERENCES `cheap_product_orders` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `cheap_order_items_price_positive` CHECK (`price_cents` > 0),
+    CONSTRAINT `cheap_order_items_quantity_positive` CHECK (`quantity` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- Expensive products — legitimate digital products catalogue
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `expensive_products` (
