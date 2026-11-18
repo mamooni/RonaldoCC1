@@ -32,6 +32,8 @@
     historyBody: document.getElementById("historyBody"),
     historyEmpty: document.getElementById("historyEmpty"),
     usersBody: document.getElementById("usersBody"),
+    cheapOrdersBody: document.getElementById("cheapOrdersBody"),
+    cheapOrdersEmpty: document.getElementById("cheapOrdersEmpty"),
     expensiveOrdersBody: document.getElementById("expensiveOrdersBody"),
     expensiveOrdersEmpty: document.getElementById("expensiveOrdersEmpty"),
   };
@@ -181,6 +183,25 @@
     });
   }
 
+  function renderCheapOrders(orders) {
+    if (!ui.cheapOrdersBody || !ui.cheapOrdersEmpty) return;
+    ui.cheapOrdersBody.innerHTML = "";
+    ui.cheapOrdersEmpty.hidden = orders.length > 0;
+    orders.forEach(function (order) {
+      var tr = document.createElement("tr");
+      tr.appendChild(cell("#" + order.id, "atable__mono"));
+      tr.appendChild(cell(order.username || "Unknown user"));
+      var summary = (order.items || []).map(function (item) {
+        return item.title + " × " + item.quantity + " (" + money(item.price) + " each)";
+      }).join(" · ");
+      tr.appendChild(cell(summary || "No items recorded"));
+      tr.appendChild(cell(money(order.total), "atable__mono"));
+      tr.appendChild(chip("Paid", "ok"));
+      tr.appendChild(cell(stamp(order.created_at), "atable__when"));
+      ui.cheapOrdersBody.appendChild(tr);
+    });
+  }
+
   function renderExpensiveOrders(orders) {
     ui.expensiveOrdersBody.innerHTML = "";
 
@@ -238,6 +259,7 @@
     renderPending(data.payments || []);
     renderHistory(data.payments || []);
     renderUsers(data.users || []);
+    renderCheapOrders(data.cheap_orders || []);
     renderExpensiveOrders(data.expensive_orders || []);
 
     if (ui.stamp) {
