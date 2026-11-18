@@ -5567,9 +5567,10 @@ button.menu__item {
   background:var(--surface); border:1px solid var(--border);
 }
 .page--expensive .expensive-filters {
-  display:grid; grid-template-columns:minmax(220px,2fr) minmax(160px,1fr) minmax(160px,1fr);
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
   gap:14px; margin:0 0 18px;
 }
+.page--expensive .expensive-filters label:first-child { grid-column:span 2; }
 .page--expensive .expensive-filters label {
   display:flex; flex-direction:column; gap:0; color:var(--text-dim);
 }
@@ -5602,9 +5603,14 @@ button.menu__item {
 .page--expensive .expensive-actions button { padding:7px 10px; font-size:12px; }
 .page--expensive .expensive-pagination { margin:18px 0 0; gap:10px; }
 .page--expensive .expensive-pagination span { color:var(--text-mute); font-size:12px; }
+@media (max-width:900px) {
+  .page--expensive .expensive-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .page--expensive .expensive-filters label:first-child { grid-column:span 2; }
+}
 @media (max-width:650px) {
   .page--expensive .expensive-catalogue { padding:16px 14px; }
   .page--expensive .expensive-filters { grid-template-columns:1fr; gap:12px; }
+  .page--expensive .expensive-filters label:first-child { grid-column:auto; }
 }
 
 /* Premium catalogue: make horizontal scrolling obvious and add restrained colour accents. */
