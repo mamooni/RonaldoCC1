@@ -166,9 +166,11 @@ CREATE TABLE IF NOT EXISTS `expensive_products` (
     `blurb`        TEXT NOT NULL,
     `created_at`   BIGINT NOT NULL,
     `created_by`   INT UNSIGNED NULL,
+    `catalogue_date` DATE NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `expensive_products_product_id` (`product_id`),
     KEY `expensive_products_created` (`created_at`, `id`),
+    KEY `expensive_products_catalogue_date` (`catalogue_date`, `id`),
     CONSTRAINT `expensive_products_price_positive`
         CHECK (`price_cents` > 0),
     CONSTRAINT `expensive_products_admin_fk`
