@@ -3711,8 +3711,8 @@ class Handler(BaseHTTPRequestHandler):
                 try: cents = int((Decimal(v) * 100).quantize(Decimal("1")))
                 except (InvalidOperation, ValueError): return self._error(400, "Invalid price filter.")
                 clauses.append("price_cents " + op + " ?"); args.append(cents)
-        if val("refund") == "yes": clauses.append("CAST(refund_period AS REAL) > 0")
-        elif val("refund") == "no": clauses.append("CAST(refund_period AS REAL) <= 0")
+        if val("refund") == "yes": clauses.append("CAST(refund_period AS DECIMAL(10,2)) > 0")
+        elif val("refund") == "no": clauses.append("CAST(refund_period AS DECIMAL(10,2)) <= 0")
         expiry = val("expiry")
         if re.fullmatch(r"\d{2}/\d{4}", expiry):
             mm, yyyy = expiry.split("/"); clauses.append("substr(exp_date, 6, 2) = ? AND substr(exp_date, 1, 4) = ?"); args.extend([mm, yyyy])
@@ -3727,13 +3727,13 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute("SELECT id, product_id, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
             cats = conn.execute("SELECT DISTINCT category FROM expensive_products WHERE category <> '' ORDER BY category").fetchall()
             countries = conn.execute("SELECT DISTINCT country_code FROM expensive_products WHERE country_code IS NOT NULL AND country_code <> '' ORDER BY country_code").fetchall()
-            expiry_rows = conn.execute("SELECT DISTINCT substr(exp_date, 6, 2) || '/' || substr(exp_date, 1, 4) AS expiry FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY substr(exp_date, 1, 7)").fetchall()
+            expiry_rows = conn.execute("SELECT DISTINCT exp_date FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY exp_date").fetchall()
             format_rows = conn.execute("SELECT formats FROM expensive_products WHERE formats <> ''").fetchall()
         products = []
         for row in rows:
             product = dict(row); product["price"] = dollars(product.pop("price_cents")); product["expDate"] = display_exp_date(product.pop("exp_date", None)); products.append(product)
         formats = sorted({part.strip() for row in format_rows for part in re.split(r"[,;|]", row["formats"] or "") if part.strip()}, key=str.lower)
-        return self._json(200, {"products": products, "total": total, "page": page, "per_page": limit, "facets": {"categories": [x["category"] for x in cats], "countries": [x["country_code"] for x in countries], "expiries": [x["expiry"] for x in expiry_rows if x["expiry"]], "formats": formats}})
+        return self._json(200, {"products": products, "total": total, "page": page, "per_page": limit, "facets": {"categories": [x["category"] for x in cats], "countries": [x["country_code"] for x in countries], "expiries": [display_exp_date(x["exp_date"]) for x in expiry_rows if x["exp_date"]], "formats": formats}})
     def api_orders(self):
         """The signed-in account's purchases, newest first."""
         user = self._current_user()
