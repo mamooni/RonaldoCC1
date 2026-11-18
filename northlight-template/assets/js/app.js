@@ -1835,7 +1835,7 @@
     var viewBtn = el("button", "btn btn--primary", "View Cards");
     viewBtn.type = "button";
     viewBtn.addEventListener("click", function () {
-      openDialog(item);
+      window.location.href = "search.html";
     });
 
     var actionRow = el("tr", "specs__actionRow");
