@@ -1568,7 +1568,7 @@
     cartBtn.addEventListener("click", function () {
       if (!window.NLCart) return;
       window.NLCart.add({
-        key: String(item.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
+        key: String(item.id),
         title: item.title,
         price: item.price,
         qty: 1,
