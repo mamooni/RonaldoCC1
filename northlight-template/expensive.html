@@ -199,6 +199,34 @@
             <option value="high-low">Price: High to Low</option>
           </select>
         </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Minimum price (USD)</span>
+          <input class="input-sm" id="expensiveMinPrice" type="number" min="0" step="0.01" placeholder="No minimum" />
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Maximum price (USD)</span>
+          <input class="input-sm" id="expensiveMaxPrice" type="number" min="0" step="0.01" placeholder="No maximum" />
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Refund eligibility</span>
+          <select class="select select--block" id="expensiveRefund">
+            <option value="">All refund options</option>
+            <option value="yes">Refundable</option>
+            <option value="no">Not refundable</option>
+          </select>
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Expiry date</span>
+          <select class="select select--block" id="expensiveExpiry">
+            <option value="">All expiry dates</option>
+          </select>
+        </label>
+        <label class="field-sm">
+          <span class="field-sm__label">Format / platform</span>
+          <select class="select select--block" id="expensiveFormat">
+            <option value="">All formats</option>
+          </select>
+        </label>
       </div>
       <div class="expensive-scroll-cue" aria-label="Table scrolling instructions">
         <span class="expensive-scroll-cue__icon" aria-hidden="true">↔</span>
