@@ -40,11 +40,8 @@ CREATORS = [
 ]
 
 FORMATS = [
-    "HTML, CSS, JavaScript",
-    "PDF",
-    "Figma",
-    "ZIP",
-    "DOCX, PDF",
+    "Credit",
+    "Debit",
 ]
 
 COUNTRIES = [
