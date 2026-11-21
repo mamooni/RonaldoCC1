@@ -450,7 +450,7 @@
           throw new Error("Choose the edited 250-row CSV file before replacing the catalogue.");
         }
         const file = draftCsvInput.files[0];
-        if (!/\\.csv$/i.test(file.name) || file.size > 100000) {
+        if (!/\.csv$/i.test(file.name) || file.size > 100000) {
           throw new Error("Choose a CSV file smaller than 100 KB.");
         }
         const csvText = await file.text();
