@@ -195,7 +195,7 @@ def get_crypto_prices():
         return prices.copy()
 
 
-MAX_BODY = 8 * 1024       # 8 KB is plenty for these forms
+MAX_BODY = 128 * 1024     # Allows an admin to submit the edited 250-row CSV
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
 
 # Behind HTTPS (or a TLS terminator) set NL_HTTPS=1 so the session cookie
@@ -2995,14 +2995,21 @@ class Handler(BaseHTTPRequestHandler):
             "Product ID", "Product", "Category", "Intended Market", "Format",
             "Creator", "Licence", "Expiry (MM/YYYY)", "Price (USD)", "Status",
         ]
+        csv_text = payload.get("csv_text") if isinstance(payload, dict) else None
         try:
-            with source.open("r", encoding="utf-8-sig", newline="") as handle:
-                reader = csv.DictReader(handle)
-                if reader.fieldnames != required_headers:
-                    return self._json(400, {"error": "The draft CSV headers do not match the required template."})
+            if csv_text is not None:
+                if not isinstance(csv_text, str) or len(csv_text.encode("utf-8")) > 100000:
+                    return self._json(400, {"error": "The uploaded CSV is too large or invalid."})
+                reader = csv.DictReader(csv_text.splitlines())
                 rows = list(reader)
+            else:
+                with source.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    rows = list(reader)
+            if reader.fieldnames != required_headers:
+                return self._json(400, {"error": "The draft CSV headers do not match the required template."})
         except (OSError, csv.Error):
-            return self._error(500, "The draft inventory file could not be read.")
+            return self._error(400, "The draft inventory CSV could not be read.")
 
         if len(rows) != 250:
             return self._json(400, {
