@@ -862,6 +862,15 @@ def _migrate(conn):
     conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
     conn.executescript(AUDIT_TABLE)
     conn.executescript(PASSWORD_RESETS_TABLE)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
+        "product_id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', "
+        "category TEXT NOT NULL DEFAULT '', intended_market TEXT NOT NULL DEFAULT '', "
+        "formats TEXT NOT NULL DEFAULT '', creator TEXT NOT NULL DEFAULT '', "
+        "license TEXT NOT NULL DEFAULT '', expiry TEXT NOT NULL DEFAULT '', "
+        "price_usd TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Draft', "
+        "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, created_by INTEGER)"
+    )
 
 
 def _rebuild(conn, table: str, create_sql: str, copy_sql: str):
@@ -938,6 +947,7 @@ MYSQL_TABLES = (
     "expensive_products",
     "expensive_product_orders",
     "expensive_product_order_items",
+    "expensive_product_drafts",
     "audit",
     "postcodes",
     "password_resets",
@@ -973,6 +983,23 @@ def init_mysql():
             "REFERENCES cheap_product_orders(id) ON DELETE CASCADE, "
             "CONSTRAINT cheap_order_items_price_positive CHECK (price_cents > 0), "
             "CONSTRAINT cheap_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
+            "product_id VARCHAR(64) NOT NULL PRIMARY KEY, "
+            "title VARCHAR(190) NOT NULL DEFAULT '', "
+            "category VARCHAR(100) NOT NULL DEFAULT '', "
+            "intended_market VARCHAR(100) NOT NULL DEFAULT '', "
+            "formats VARCHAR(255) NOT NULL DEFAULT '', "
+            "creator VARCHAR(100) NOT NULL DEFAULT '', "
+            "license VARCHAR(190) NOT NULL DEFAULT '', "
+            "expiry VARCHAR(7) NOT NULL DEFAULT '', "
+            "price_usd VARCHAR(32) NOT NULL DEFAULT '', "
+            "status VARCHAR(20) NOT NULL DEFAULT 'Draft', "
+            "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, "
+            "created_by INT UNSIGNED NULL, "
+            "KEY expensive_product_drafts_status (status)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
         missing = [t for t in MYSQL_TABLES if not _has_table(conn, t)]
@@ -2955,7 +2982,7 @@ class Handler(BaseHTTPRequestHandler):
     
 
     def api_admin_import_expensive_draft(self, payload):
-        """Import the committed draft catalogue once; existing public IDs are never overwritten."""
+        """Atomically replace the public catalogue with 250 private editable drafts."""
         admin = self._require_admin()
         if admin is None:
             return self._json(403, {"error": "Admins only."})
@@ -2964,100 +2991,107 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(429, "Slow down for a moment.")
 
         source = WEB_ROOT / "database" / "inventory-draft.csv"
+        required_headers = [
+            "Product ID", "Product", "Category", "Intended Market", "Format",
+            "Creator", "Licence", "Expiry (MM/YYYY)", "Price (USD)", "Status",
+        ]
         try:
             with source.open("r", encoding="utf-8-sig", newline="") as handle:
-                rows = list(csv.DictReader(handle))
+                reader = csv.DictReader(handle)
+                if reader.fieldnames != required_headers:
+                    return self._json(400, {"error": "The draft CSV headers do not match the required template."})
+                rows = list(reader)
         except (OSError, csv.Error):
             return self._error(500, "The draft inventory file could not be read.")
 
-        if len(rows) != 150:
-            return self._json(
-                500,
-                {"error": "The draft inventory must contain exactly 150 rows.",
-                 "found": len(rows)},
-            )
+        if len(rows) != 250:
+            return self._json(400, {
+                "error": "The draft inventory must contain exactly 250 rows.",
+                "found": len(rows),
+            })
 
         cleaned = []
         seen = set()
+        limits = {
+            "Product": 190, "Category": 100, "Intended Market": 100,
+            "Format": 255, "Creator": 100, "Licence": 190,
+            "Expiry (MM/YYYY)": 7, "Price (USD)": 32,
+        }
         for index, row in enumerate(rows, start=1):
-            public_id = (row.get("Product ID") or "").strip()
-            title = (row.get("Product") or "").strip()
-            category = (row.get("Category") or "").strip()
-            formats = (row.get("Format") or "").strip()
-            expiry, expiry_error = parse_exp_date(
-                (row.get("Expiry (MM/YYYY)") or "").strip()
-            )
-            cents, price_error = parse_cents(
-                (row.get("Price (USD)") or "").strip(), low=1, high=100000000
-            )
-            if (
-                not public_id or len(public_id) > 64
-                or not title or len(title) > 190
-                or not category or len(category) > 100
-                or not formats or len(formats) > 255
-                or public_id in seen or expiry_error or price_error
-            ):
-                return self._json(
-                    500,
-                    {"error": f"Draft inventory row {index} is invalid.",
-                     "expiry_error": expiry_error, "price_error": price_error},
-                )
+            public_id = (row.get("Product ID") or "").strip().upper()
+            status = (row.get("Status") or "Draft").strip().title()
+            if not re.fullmatch(r"NLD-\d{3}", public_id) or public_id in seen or status != "Draft":
+                return self._json(400, {
+                    "error": f"Draft row {index} must have a unique NLD-001 to NLD-250 ID and Status Draft."
+                })
+            values = {key: (row.get(key) or "").strip() for key in limits}
+            too_long = next((key for key, limit in limits.items() if len(values[key]) > limit), None)
+            if too_long:
+                return self._json(400, {"error": f"Draft row {index}: {too_long} is too long."})
+            expiry = values["Expiry (MM/YYYY)"]
+            if expiry and not re.fullmatch(r"(0[1-9]|1[0-2])/\d{4}", expiry):
+                return self._json(400, {"error": f"Draft row {index}: expiry must be MM/YYYY or blank."})
+            price = values["Price (USD)"]
+            if price:
+                cents, problem = parse_cents(price, low=1, high=100000000)
+                if problem or cents is None:
+                    return self._json(400, {"error": f"Draft row {index}: enter a valid USD price or leave it blank."})
             seen.add(public_id)
             cleaned.append({
                 "product_id": public_id,
-                "exp_date": expiry,
-                "title": title,
-                "creator": "To be updated",
-                "category": category,
-                "formats": formats,
-                "license": "To be updated",
-                "refund_period": "To be updated",
-                "country_code": "GL",
-                "price_cents": cents,
-                "blurb": "Catalogue listing. Product details and licence terms are to be updated.",
+                "title": values["Product"],
+                "category": values["Category"],
+                "intended_market": values["Intended Market"],
+                "formats": values["Format"],
+                "creator": values["Creator"],
+                "license": values["Licence"],
+                "expiry": expiry,
+                "price_usd": price,
             })
 
-        created = 0
-        skipped = 0
+        expected_ids = {f"NLD-{number:03d}" for number in range(1, 251)}
+        if seen != expected_ids:
+            return self._json(400, {"error": "The CSV must contain every Product ID from NLD-001 through NLD-250 exactly once."})
+
         now = int(time.time())
         with db(write=True) as conn:
-            for product in cleaned:
-                exists = conn.execute(
-                    "SELECT 1 FROM expensive_products WHERE product_id = ?",
-                    (product["product_id"],),
-                ).fetchone()
-                if exists is not None:
-                    skipped += 1
-                    continue
+            old_count = conn.execute(
+                "SELECT COUNT(*) AS total FROM expensive_products"
+            ).fetchone()["total"]
+
+            # Historical order rows retain their own title, price and quantity.
+            # Do not delete or rewrite users, balances, payments, orders or audit rows.
+            conn.execute("DELETE FROM expensive_products")
+            conn.execute("DELETE FROM expensive_product_drafts")
+            for draft in cleaned:
                 conn.execute(
-                    "INSERT INTO expensive_products "
-                    "(product_id, exp_date, title, creator, category, formats, license, "
-                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO expensive_product_drafts "
+                    "(product_id, title, category, intended_market, formats, creator, "
+                    "license, expiry, price_usd, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?)",
                     (
-                        product["product_id"], product["exp_date"], product["title"],
-                        product["creator"], product["category"], product["formats"],
-                        product["license"], product["refund_period"],
-                        product["country_code"], product["price_cents"],
-                        product["blurb"], now, admin["id"], _lagos_catalogue_date(),
+                        draft["product_id"], draft["title"], draft["category"],
+                        draft["intended_market"], draft["formats"], draft["creator"],
+                        draft["license"], draft["expiry"], draft["price_usd"],
+                        now, now, admin["id"],
                     ),
                 )
-                created += 1
 
             audit(
                 conn,
-                "expensive_products.draft_import",
+                "expensive_products.catalogue_replaced",
                 actor=admin,
                 target="inventory-draft.csv",
-                detail=f"Imported {created}; skipped {skipped} existing product ID(s).",
+                detail=f"Replaced {old_count} live products with 250 private draft rows.",
                 ip=self.client_address[0],
             )
 
-        return self._json(
-            200,
-            {"ok": True, "created": created, "skipped": skipped,
-             "total": len(cleaned)},
-        )
+        return self._json(200, {
+            "ok": True,
+            "drafts_created": len(cleaned),
+            "live_products_removed": old_count,
+            "customer_history_preserved": True,
+        })
 
     def api_admin_update_expensive_product(self, payload):
         """Update one existing legitimate digital product."""
