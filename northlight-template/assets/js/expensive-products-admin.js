@@ -10,6 +10,7 @@
   const saveButton = document.getElementById("saveExpensiveProducts");
   const note = document.getElementById("productsAdminNote");
   const importButton = document.getElementById("importExpensiveDraft");
+  const draftCsvInput = document.getElementById("expensiveDraftCsv");
   const tableBody = document.getElementById("expensiveProductsBody");
   const loadMoreButton = document.getElementById("loadMoreExpensiveProducts");
   const PRODUCTS_PER_PAGE = 10;
@@ -443,12 +444,20 @@
       if (!confirmed) return;
 
       importButton.disabled = true;
-      showNote("Validating CSV and replacing the live catalogue… please keep this page open.", false);
+      showNote("Reading and validating the CSV… please keep this page open.", false);
       try {
+        if (!draftCsvInput || !draftCsvInput.files || !draftCsvInput.files.length) {
+          throw new Error("Choose the edited 250-row CSV file before replacing the catalogue.");
+        }
+        const file = draftCsvInput.files[0];
+        if (!/\\.csv$/i.test(file.name) || file.size > 100000) {
+          throw new Error("Choose a CSV file smaller than 100 KB.");
+        }
+        const csvText = await file.text();
         const response = await fetch("api/admin/expensive-products/import-draft", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
+          body: JSON.stringify({ csv_text: csvText })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not import the draft inventory.");
