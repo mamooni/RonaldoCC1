@@ -435,12 +435,15 @@
   if (importButton) {
     importButton.addEventListener("click", async function () {
       const confirmed = window.confirm(
-        "Import the 150 prepared draft products? Existing Product IDs will be skipped, not changed."
+        "Replace the entire live premium catalogue with the 250 rows in inventory-draft.csv?\n\n" +
+        "All current premium products will be removed from the live shop. The 250 rows will be saved as private drafts, not published. " +
+        "Customer accounts, wallet balances, deposits, purchases, order history and audit records will be preserved. " +
+        "This action cannot be undone."
       );
       if (!confirmed) return;
 
       importButton.disabled = true;
-      showNote("Importing draft products… please keep this page open.", false);
+      showNote("Validating CSV and replacing the live catalogue… please keep this page open.", false);
       try {
         const response = await fetch("api/admin/expensive-products/import-draft", {
           method: "POST",
@@ -450,8 +453,9 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not import the draft inventory.");
         showNote(
-          "Import complete: " + data.created + " added, " + data.skipped +
-          " already existed and were skipped. Total checked: " + data.total + ".",
+          "Replacement complete: " + data.live_products_removed +
+          " live products removed; " + data.drafts_created +
+          " private draft rows saved. Customer history was preserved.",
           false
         );
         await loadProducts();
