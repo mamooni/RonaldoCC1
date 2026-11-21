@@ -48,6 +48,7 @@ import calendar
 import contextlib
 import csv
 import hashlib
+import io
 import hmac
 import json
 import mimetypes
@@ -3000,7 +3001,7 @@ class Handler(BaseHTTPRequestHandler):
             if csv_text is not None:
                 if not isinstance(csv_text, str) or len(csv_text.encode("utf-8")) > 100000:
                     return self._json(400, {"error": "The uploaded CSV is too large or invalid."})
-                reader = csv.DictReader(csv_text.splitlines())
+                reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff"), newline=""))
                 rows = list(reader)
             else:
                 with source.open("r", encoding="utf-8-sig", newline="") as handle:
