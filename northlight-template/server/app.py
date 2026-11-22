@@ -1844,6 +1844,7 @@ POST_ROUTES = {
     "/api/admin/payment": "api_admin_payment",
     "/api/admin/expensive-products": "api_admin_expensive_products",
     "/api/admin/expensive-products/import-draft": "api_admin_import_expensive_draft",
+    "/api/admin/expensive-products/drafts/repair-order": "api_admin_repair_expensive_draft_order",
     "/api/admin/expensive-products/drafts/update": "api_admin_update_expensive_draft",
     "/api/admin/expensive-products/drafts/publish": "api_admin_publish_expensive_drafts",
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
@@ -3224,6 +3225,79 @@ class Handler(BaseHTTPRequestHandler):
             "drafts": [dict(row) for row in rows],
             "count": len(rows),
             "expected_count": 276,
+        })
+
+    def api_admin_repair_expensive_draft_order(self, payload):
+        """Repair only csv_position after validating an exact match to all private drafts."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        csv_text = payload.get("csv_text") if isinstance(payload, dict) else None
+        if not isinstance(csv_text, str) or len(csv_text.encode("utf-8")) > 100000:
+            return self._json(400, {"error": "The CSV is too large or invalid."})
+
+        required_headers = [
+            "Product ID", "Product", "Category", "Intended Market", "Format",
+            "Creator", "Licence", "Expiry (MM/YYYY)", "Price (USD)", "Status",
+        ]
+        try:
+            reader = csv.DictReader(io.StringIO(csv_text.lstrip(chr(65279)), newline=""))
+            rows = list(reader)
+            headers = reader.fieldnames
+            if headers and headers[0] == "index":
+                headers = headers[1:]
+                for row in rows:
+                    row.pop("index", None)
+            if headers != required_headers:
+                return self._json(400, {"error": "The CSV headers do not match the expected inventory template."})
+        except csv.Error:
+            return self._error(400, "The CSV could not be read.")
+
+        if len(rows) != 276:
+            return self._json(400, {"error": "The ordering CSV must contain exactly 276 rows.", "found": len(rows)})
+
+        ordered_ids = []
+        seen = set()
+        for position, row in enumerate(rows, start=1):
+            product_id = str(row.get("Product ID") or "").strip()
+            status = str(row.get("Status") or "Draft").strip().title()
+            if not re.fullmatch(r"[0-9]{1,64}", product_id) or product_id in seen or status != "Draft":
+                return self._json(400, {"error": f"CSV row {position} must contain a unique numeric Product ID and Status Draft."})
+            seen.add(product_id)
+            ordered_ids.append(product_id)
+
+        with db(write=True) as conn:
+            draft_rows = conn.execute(
+                "SELECT product_id FROM expensive_product_drafts"
+            ).fetchall()
+            current_ids = {str(row["product_id"]).strip() for row in draft_rows}
+            if len(draft_rows) != 276 or current_ids != seen:
+                return self._json(409, {
+                    "error": "The CSV Product IDs do not exactly match the 276 saved drafts. Nothing was changed.",
+                    "draft_count": len(draft_rows),
+                    "missing_from_drafts": sorted(seen - current_ids)[:10],
+                    "not_in_csv": sorted(current_ids - seen)[:10],
+                })
+
+            for position, product_id in enumerate(ordered_ids, start=1):
+                conn.execute(
+                    "UPDATE expensive_product_drafts SET csv_position = ? WHERE product_id = ?",
+                    (position, product_id),
+                )
+            audit(
+                conn, "expensive_products.draft_order_repaired", actor=admin,
+                target="inventory-draft-final.csv",
+                detail="Repaired csv_position for 276 existing drafts after exact Product ID set validation.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {
+            "ok": True,
+            "updated": len(ordered_ids),
+            "first_product_ids": ordered_ids[:3],
+            "only_csv_position_changed": True,
         })
 
     def api_admin_update_expensive_draft(self, payload):
