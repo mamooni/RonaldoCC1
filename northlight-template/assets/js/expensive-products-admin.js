@@ -436,8 +436,8 @@
   if (importButton) {
     importButton.addEventListener("click", async function () {
       const confirmed = window.confirm(
-        "Replace the entire live premium catalogue with the 250 rows in inventory-draft.csv?\n\n" +
-        "All current premium products will be removed from the live shop. The 250 rows will be saved as private drafts, not published. " +
+        "Replace the entire live premium catalogue with the 276 rows in your selected CSV?\n\n" +
+        "All current premium products will be removed from the live shop. The 276 rows will be saved as private drafts, not published. " +
         "Customer accounts, wallet balances, deposits, purchases, order history and audit records will be preserved. " +
         "This action cannot be undone."
       );
@@ -447,7 +447,7 @@
       showNote("Reading and validating the CSV… please keep this page open.", false);
       try {
         if (!draftCsvInput || !draftCsvInput.files || !draftCsvInput.files.length) {
-          throw new Error("Choose the edited 250-row CSV file before replacing the catalogue.");
+          throw new Error("Choose the edited 276-row CSV file before replacing the catalogue.");
         }
         const file = draftCsvInput.files[0];
         if (!/\.csv$/i.test(file.name) || file.size > 100000) {
