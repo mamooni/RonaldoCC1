@@ -708,6 +708,99 @@ def _table_columns(conn, table: str):
 
 
 
+def _country_catalogue():
+    """Read the same ISO country list used by the admin country dropdown."""
+    path = WEB_ROOT / "assets" / "js" / "countries.js"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return {
+        code: name
+        for code, name in re.findall(r'\["([A-Z]{2})",\s*"([^"]+)"\]', source)
+    }
+
+
+def _market_key(value):
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+
+def _country_code_from_market(value):
+    """Resolve a single country name/code; never guess multi-country markets."""
+    key = _market_key(value)
+    if not key:
+        return ""
+    aliases = {
+        "us": "US", "usa": "US", "u s a": "US", "united states of america": "US",
+        "uk": "GB", "u k": "GB", "great britain": "GB", "britain": "GB",
+        "south korea": "KR", "republic of korea": "KR",
+        "north korea": "KP", "uae": "AE", "u a e": "AE",
+        "ivory coast": "CI", "czech republic": "CZ",
+        "global": "GL", "worldwide": "GL",
+    }
+    if key in aliases:
+        return aliases[key]
+    countries = _country_catalogue()
+    for code, name in countries.items():
+        if key == _market_key(name) or key == code.casefold():
+            return code
+    return ""
+
+
+def _random_refund_periods(count):
+    """Return a one-time shuffled 75% zero / 25% three assignment."""
+    values = ["0"] * ((count * 3 + 3) // 4)
+    values.extend(["3"] * (count - len(values)))
+    secrets.SystemRandom().shuffle(values)
+    return values
+
+
+def _ensure_expensive_draft_fields(conn):
+    """Add workflow fields and safely backfill drafts created by the old importer."""
+    columns = _table_columns(conn, "expensive_product_drafts")
+    definitions = {
+        "country_code": ("CHAR(2)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+        "refund_period": ("VARCHAR(8)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+        "blurb": ("VARCHAR(4000)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+    }
+    for name, definition in definitions.items():
+        if name not in columns:
+            conn.execute(
+                "ALTER TABLE expensive_product_drafts ADD COLUMN " + name + " " + definition
+            )
+
+    rows = conn.execute(
+        "SELECT product_id, intended_market, country_code, refund_period, blurb "
+        "FROM expensive_product_drafts ORDER BY product_id"
+    ).fetchall()
+    pending_refunds = [row for row in rows if not str(row["refund_period"] or "").strip()]
+    pending_ids = {row["product_id"] for row in pending_refunds}
+    assignments = _random_refund_periods(len(pending_refunds))
+    now = int(time.time())
+    for row, refund in zip(pending_refunds, assignments):
+        country = str(row["country_code"] or "").strip().upper()
+        if not country:
+            country = _country_code_from_market(row["intended_market"])
+        conn.execute(
+            "UPDATE expensive_product_drafts SET refund_period = ?, blurb = ?, "
+            "country_code = ?, updated_at = ? WHERE product_id = ?",
+            (refund, str(row["blurb"] or "").strip() or "Good", country, now, row["product_id"]),
+        )
+    for row in rows:
+        if row["product_id"] in pending_ids:
+            continue
+        blurb = str(row["blurb"] or "").strip()
+        country = str(row["country_code"] or "").strip().upper()
+        if not country:
+            country = _country_code_from_market(row["intended_market"])
+        if not blurb or not country:
+            conn.execute(
+                "UPDATE expensive_product_drafts SET blurb = ?, country_code = ?, updated_at = ? "
+                "WHERE product_id = ?",
+                (blurb or "Good", country, now, row["product_id"]),
+            )
+
+
 def _lagos_catalogue_date():
     """Return today's calendar date in Nigeria (UTC+1; no daylight saving)."""
     return datetime.now(timezone(timedelta(hours=1))).date().isoformat()
@@ -872,6 +965,7 @@ def _migrate(conn):
         "price_usd TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Draft', "
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, created_by INTEGER)"
     )
+    _ensure_expensive_draft_fields(conn)
 
 
 def _rebuild(conn, table: str, create_sql: str, copy_sql: str):
@@ -1000,6 +1094,9 @@ def init_mysql():
             "status VARCHAR(20) NOT NULL DEFAULT 'Draft', "
             "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, "
             "created_by INT UNSIGNED NULL, "
+            "country_code CHAR(2) NOT NULL DEFAULT '', "
+            "refund_period VARCHAR(8) NOT NULL DEFAULT '', "
+            "blurb VARCHAR(4000) NOT NULL DEFAULT '', "
             "KEY expensive_product_drafts_status (status)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
@@ -1023,6 +1120,7 @@ def init_mysql():
                 "ALTER TABLE expensive_products ADD COLUMN exp_date DATE NULL"
             )
         _ensure_expensive_catalogue_dates(conn)
+        _ensure_expensive_draft_fields(conn)
         product_id_index = conn.execute(
             "SELECT 1 AS hit FROM information_schema.statistics "
             "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
@@ -1740,6 +1838,8 @@ POST_ROUTES = {
     "/api/admin/payment": "api_admin_payment",
     "/api/admin/expensive-products": "api_admin_expensive_products",
     "/api/admin/expensive-products/import-draft": "api_admin_import_expensive_draft",
+    "/api/admin/expensive-products/drafts/update": "api_admin_update_expensive_draft",
+    "/api/admin/expensive-products/drafts/publish": "api_admin_publish_expensive_drafts",
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
 }
@@ -2022,6 +2122,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_my_payments()
         if path == "/api/admin/data":
             return self.api_admin_data()
+        if path == "/api/admin/expensive-products/drafts":
+            return self.api_admin_expensive_product_drafts()
         if path == "/api/bundles":
             return self.api_bundles()
         if path == "/api/expensive-products":
@@ -3058,6 +3160,7 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         now = int(time.time())
+        refund_assignments = _random_refund_periods(len(cleaned))
         with db(write=True) as conn:
             old_count = conn.execute(
                 "SELECT COUNT(*) AS total FROM expensive_products"
@@ -3067,17 +3170,19 @@ class Handler(BaseHTTPRequestHandler):
             # Do not delete or rewrite users, balances, payments, orders or audit rows.
             conn.execute("DELETE FROM expensive_products")
             conn.execute("DELETE FROM expensive_product_drafts")
-            for draft in cleaned:
+            for draft, refund_period in zip(cleaned, refund_assignments):
+                country_code = _country_code_from_market(draft["intended_market"])
                 conn.execute(
                     "INSERT INTO expensive_product_drafts "
                     "(product_id, title, category, intended_market, formats, creator, "
-                    "license, expiry, price_usd, status, created_at, updated_at, created_by) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?)",
+                    "license, expiry, price_usd, status, created_at, updated_at, created_by, "
+                    "country_code, refund_period, blurb) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, 'Good')",
                     (
                         draft["product_id"], draft["title"], draft["category"],
                         draft["intended_market"], draft["formats"], draft["creator"],
                         draft["license"], draft["expiry"], draft["price_usd"],
-                        now, now, admin["id"],
+                        now, now, admin["id"], country_code, refund_period,
                     ),
                 )
 
