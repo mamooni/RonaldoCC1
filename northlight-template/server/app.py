@@ -196,7 +196,7 @@ def get_crypto_prices():
         return prices.copy()
 
 
-MAX_BODY = 128 * 1024     # Allows an admin to submit the edited 250-row CSV
+MAX_BODY = 128 * 1024     # Allows an admin to submit the edited catalogue CSV
 MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
 
 # Behind HTTPS (or a TLS terminator) set NL_HTTPS=1 so the session cookie
@@ -2983,7 +2983,7 @@ class Handler(BaseHTTPRequestHandler):
     
 
     def api_admin_import_expensive_draft(self, payload):
-        """Atomically replace the public catalogue with 250 private editable drafts."""
+        """Atomically replace the public catalogue with 276 private editable drafts."""
         admin = self._require_admin()
         if admin is None:
             return self._json(403, {"error": "Admins only."})
@@ -3012,9 +3012,9 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, csv.Error):
             return self._error(400, "The draft inventory CSV could not be read.")
 
-        if len(rows) != 250:
+        if len(rows) != 276:
             return self._json(400, {
-                "error": "The draft inventory must contain exactly 250 rows.",
+                "error": "The draft inventory must contain exactly 276 rows.",
                 "found": len(rows),
             })
 
@@ -3026,11 +3026,11 @@ class Handler(BaseHTTPRequestHandler):
             "Expiry (MM/YYYY)": 7, "Price (USD)": 32,
         }
         for index, row in enumerate(rows, start=1):
-            public_id = (row.get("Product ID") or "").strip().upper()
+            public_id = (row.get("Product ID") or "").strip()
             status = (row.get("Status") or "Draft").strip().title()
-            if not re.fullmatch(r"NLD-\d{3}", public_id) or public_id in seen or status != "Draft":
+            if not re.fullmatch(r"[0-9]{1,64}", public_id) or public_id in seen or status != "Draft":
                 return self._json(400, {
-                    "error": f"Draft row {index} must have a unique NLD-001 to NLD-250 ID and Status Draft."
+                    "error": f"Draft row {index} must have a unique numeric Product ID and Status Draft."
                 })
             values = {key: (row.get(key) or "").strip() for key in limits}
             too_long = next((key for key, limit in limits.items() if len(values[key]) > limit), None)
@@ -3056,10 +3056,6 @@ class Handler(BaseHTTPRequestHandler):
                 "expiry": expiry,
                 "price_usd": price,
             })
-
-        expected_ids = {f"NLD-{number:03d}" for number in range(1, 251)}
-        if seen != expected_ids:
-            return self._json(400, {"error": "The CSV must contain every Product ID from NLD-001 through NLD-250 exactly once."})
 
         now = int(time.time())
         with db(write=True) as conn:
@@ -3090,7 +3086,7 @@ class Handler(BaseHTTPRequestHandler):
                 "expensive_products.catalogue_replaced",
                 actor=admin,
                 target="inventory-draft.csv",
-                detail=f"Replaced {old_count} live products with 250 private draft rows.",
+                detail=f"Replaced {old_count} live products with {len(cleaned)} private draft rows.",
                 ip=self.client_address[0],
             )
 
