@@ -3097,6 +3097,209 @@ class Handler(BaseHTTPRequestHandler):
             "customer_history_preserved": True,
         })
 
+    def api_admin_expensive_product_drafts(self):
+        """Return the private draft catalogue to administrators only."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT product_id, title, category, intended_market, country_code, "
+                "formats, creator, license, expiry, price_usd, refund_period, blurb, "
+                "status, updated_at FROM expensive_product_drafts ORDER BY product_id"
+            ).fetchall()
+        return self._json(200, {
+            "drafts": [dict(row) for row in rows],
+            "count": len(rows),
+            "expected_count": 276,
+        })
+
+    def api_admin_update_expensive_draft(self, payload):
+        """Save edits to one private draft without publishing it."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        product_id = str(payload.get("product_id") or "").strip()
+        if not re.fullmatch(r"[0-9]{1,64}", product_id):
+            return self._json(400, {"error": "Product ID must remain numeric."})
+
+        fields = {
+            "title": 190, "category": 100, "intended_market": 100,
+            "formats": 255, "creator": 100, "license": 190,
+            "expiry": 7, "price_usd": 32,
+        }
+        values = {}
+        for field, limit in fields.items():
+            value = payload.get(field, "")
+            if not isinstance(value, str):
+                return self._json(400, {"error": field.replace("_", " ").title() + " must be text."})
+            value = value.strip()
+            if len(value) > limit:
+                return self._json(400, {"error": field.replace("_", " ").title() + " is too long."})
+            values[field] = value
+
+        expiry = values["expiry"]
+        if expiry and not re.fullmatch(r"(0[1-9]|1[0-2])/\d{4}", expiry):
+            return self._json(400, {"error": "Expiry must use MM/YYYY or be left blank."})
+        price = values["price_usd"]
+        if price:
+            cents, problem = parse_cents(price, low=1, high=100000000)
+            if problem:
+                return self._json(400, {"error": "Enter a valid USD price or leave it blank."})
+
+        country_code = str(payload.get("country_code") or "").strip().upper()
+        valid_codes = _country_catalogue()
+        if country_code and country_code not in valid_codes:
+            return self._json(400, {"error": "Select a valid country from the list."})
+        if not country_code:
+            country_code = _country_code_from_market(values["intended_market"])
+
+        refund_period = str(payload.get("refund_period") or "").strip()
+        if refund_period not in ("0", "3"):
+            return self._json(400, {"error": "Refund period must be 0 or 3."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM expensive_product_drafts WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()
+            if existing is None:
+                return self._json(404, {"error": "Draft product not found."})
+            conn.execute(
+                "UPDATE expensive_product_drafts SET title = ?, category = ?, "
+                "intended_market = ?, formats = ?, creator = ?, license = ?, "
+                "expiry = ?, price_usd = ?, country_code = ?, refund_period = ?, "
+                "blurb = 'Good', updated_at = ? WHERE product_id = ?",
+                (
+                    values["title"], values["category"], values["intended_market"],
+                    values["formats"], values["creator"], values["license"],
+                    expiry, price, country_code, refund_period, now, product_id,
+                ),
+            )
+            audit(
+                conn, "expensive_products.draft_update", actor=admin,
+                target=product_id, detail="Updated a private premium product draft.",
+                ip=self.client_address[0],
+            )
+        return self._json(200, {"ok": True, "product_id": product_id})
+
+    def api_admin_publish_expensive_drafts(self, payload):
+        """Validate and atomically publish all 276 private drafts."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        if not isinstance(payload, dict) or payload.get("confirm") is not True:
+            return self._json(400, {"error": "Confirm publication before continuing."})
+
+        errors = []
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT product_id, title, category, intended_market, country_code, "
+                "formats, creator, license, expiry, price_usd, refund_period "
+                "FROM expensive_product_drafts ORDER BY product_id"
+            ).fetchall()
+            if len(rows) != 276:
+                return self._json(400, {
+                    "error": "The draft catalogue must contain exactly 276 products.",
+                    "found": len(rows),
+                })
+
+            valid_codes = _country_catalogue()
+            cleaned = []
+            seen = set()
+            for row in rows:
+                label = "Draft " + str(row["product_id"])
+                public_id = str(row["product_id"] or "").strip()
+                if not re.fullmatch(r"[0-9]{1,64}", public_id) or public_id in seen:
+                    errors.append(label + ": invalid or duplicate numeric Product ID.")
+                seen.add(public_id)
+                product = {"product_id": public_id}
+                for field, label_name in (
+                    ("title", "Product"), ("category", "Category"),
+                    ("intended_market", "Intended Market"), ("formats", "Format"),
+                    ("creator", "Creator"), ("license", "Licence"),
+                ):
+                    value = str(row[field] or "").strip()
+                    if not value:
+                        errors.append(label + ": " + label_name + " is required.")
+                    product[field] = value
+
+                country_code = str(row["country_code"] or "").strip().upper()
+                if not country_code:
+                    country_code = _country_code_from_market(row["intended_market"])
+                if country_code not in valid_codes:
+                    errors.append(label + ": Intended Market could not be matched to a country. Edit this draft and select its country.")
+                product["country_code"] = country_code
+
+                exp_date, exp_error = parse_exp_date(str(row["expiry"] or ""))
+                if exp_error:
+                    errors.append(label + ": " + exp_error)
+                product["exp_date"] = exp_date
+
+                cents, price_error = parse_cents(row["price_usd"], low=1, high=100000000)
+                if price_error:
+                    errors.append(label + ": Price (USD) is missing or invalid.")
+                product["price_cents"] = cents
+
+                refund_period = str(row["refund_period"] or "").strip()
+                if refund_period not in ("0", "3"):
+                    errors.append(label + ": Refund period must be 0 or 3.")
+                product["refund_period"] = refund_period
+                cleaned.append(product)
+
+            if errors:
+                return self._json(400, {
+                    "error": "The catalogue is not ready to publish. Fix the listed drafts first.",
+                    "details": errors[:40],
+                    "error_count": len(errors),
+                })
+
+            for product in cleaned:
+                duplicate = conn.execute(
+                    "SELECT 1 FROM expensive_products WHERE product_id = ?",
+                    (product["product_id"],),
+                ).fetchone()
+                if duplicate is not None:
+                    return self._json(409, {
+                        "error": "Product ID " + product["product_id"] + " already exists in the live catalogue."
+                    })
+
+            now = int(time.time())
+            for product in cleaned:
+                conn.execute(
+                    "INSERT INTO expensive_products "
+                    "(product_id, exp_date, title, creator, category, formats, license, "
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Good', ?, ?, ?)",
+                    (
+                        product["product_id"], product["exp_date"], product["title"],
+                        product["creator"], product["category"], product["formats"],
+                        product["license"], product["refund_period"], product["country_code"],
+                        product["price_cents"], now, admin["id"], _lagos_catalogue_date(),
+                    ),
+                )
+
+            conn.execute("DELETE FROM expensive_product_drafts")
+            audit(
+                conn, "expensive_products.drafts_published", actor=admin,
+                target="276 products",
+                detail="Published all 276 validated premium product drafts.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {
+            "ok": True, "published": len(cleaned),
+            "customer_history_preserved": True,
+        })
+
     def api_admin_update_expensive_product(self, payload):
         """Update one existing legitimate digital product."""
         admin = self._require_admin()
