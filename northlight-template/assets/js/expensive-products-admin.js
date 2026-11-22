@@ -576,8 +576,10 @@
         allDrafts.filter(draftIsReady).length + " currently meet the publication checks.",
         false
       );
+      return true;
     } catch (error) {
       showDraftNote(error.message || "Could not load private drafts.", true);
+      return false;
     }
   }
 
@@ -609,7 +611,7 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not repair draft order.");
-        await loadDrafts();
+        if (!await loadDrafts()) throw new Error("Order was saved, but the refreshed draft list could not be loaded. Do not publish until you refresh and verify it.");
         const actualFirst = allDrafts.slice(0, 3).map(function (draft) { return String(draft.product_id); });
         if (actualFirst.join(",") !== data.first_product_ids.join(",")) {
           throw new Error("Positions were saved, but the refreshed list does not match. Do not publish.");
