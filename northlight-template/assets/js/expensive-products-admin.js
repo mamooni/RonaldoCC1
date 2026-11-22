@@ -29,6 +29,8 @@
   const draftNote = document.getElementById("expensiveDraftNote");
   const draftRefreshButton = document.getElementById("refreshExpensiveDrafts");
   const draftPublishButton = document.getElementById("publishExpensiveDrafts");
+  const repairDraftOrderButton = document.getElementById("repairExpensiveDraftOrder");
+  const draftOrderCsvInput = document.getElementById("expensiveDraftOrderCsv");
   const draftEditPanel = document.getElementById("editExpensiveDraft");
   const draftEditForm = document.getElementById("editExpensiveDraftForm");
   const draftEditSaveButton = document.getElementById("saveExpensiveDraft");
@@ -580,6 +582,50 @@
   }
 
   if (draftRefreshButton) draftRefreshButton.addEventListener("click", loadDrafts);
+
+  if (repairDraftOrderButton) {
+    repairDraftOrderButton.addEventListener("click", async function () {
+      if (!draftOrderCsvInput || !draftOrderCsvInput.files || !draftOrderCsvInput.files.length) {
+        showDraftNote("Choose the original inventory CSV first.", true);
+        return;
+      }
+      const file = draftOrderCsvInput.files[0];
+      if (!/\.csv$/i.test(file.name) || file.size > 100000) {
+        showDraftNote("Choose a CSV file smaller than 100 KB.", true);
+        return;
+      }
+      const confirmed = window.confirm(
+        "Repair the order of the existing 276 private drafts using this CSV?\n\n" +
+        "The server verifies that all 276 Product IDs match exactly. Only csv_position will be updated. Product details, prices, refunds, live products, customers and orders will not be changed."
+      );
+      if (!confirmed) return;
+      repairDraftOrderButton.disabled = true;
+      showDraftNote("Checking all 276 Product IDs before repairing order…", false);
+      try {
+        const response = await fetch("api/admin/expensive-products/drafts/repair-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv_text: await file.text() })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not repair draft order.");
+        await loadDrafts();
+        const actualFirst = allDrafts.slice(0, 3).map(function (draft) { return String(draft.product_id); });
+        if (actualFirst.join(",") !== data.first_product_ids.join(",")) {
+          throw new Error("Positions were saved, but the refreshed list does not match. Do not publish.");
+        }
+        showDraftNote(
+          "Order repaired and verified. First three Product IDs: " + actualFirst.join(", ") +
+          ". Only CSV positions were changed across " + data.updated + " drafts.",
+          false
+        );
+      } catch (error) {
+        showDraftNote(error.message || "Could not repair draft order.", true);
+      } finally {
+        repairDraftOrderButton.disabled = false;
+      }
+    });
+  }
 
   if (draftEditForm) {
     draftEditForm.addEventListener("submit", async function (event) {
