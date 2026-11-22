@@ -196,33 +196,10 @@
     row.appendChild(actions); return row;
   }
   function render() {
-    const dates = dateGroups();
-    const groupOrder = ["Today", "Yesterday", "Earlier this week", "Last week",
-      "Earlier this month", "Last month", "Older products"];
     body.replaceChildren();
-    if (sort.value !== "default") {
-      // The API has already sorted the complete filtered result before pagination.
-      // Do not regroup here, or date buckets would break the global price order.
-      visible.forEach(function (product) { body.appendChild(renderRow(product)); });
-    } else {
-      const grouped = new Map(groupOrder.map(name => [name, []]));
-      visible.forEach(function (product) { grouped.get(groupFor(product, dates)).push(product); });
-      let currentGroup = "";
-      groupOrder.forEach(function (name) {
-        const items = grouped.get(name);
-        if (!items.length) return;
-        const heading = document.createElement("tr");
-        heading.className = "expensive-date-group";
-        const cell = document.createElement("th");
-        cell.colSpan = 10;
-        cell.scope = "rowgroup";
-        cell.textContent = name + " · " + items.length + " product" + (items.length === 1 ? "" : "s");
-        heading.appendChild(cell);
-        body.appendChild(heading);
-        items.forEach(function (product) { body.appendChild(renderRow(product)); });
-        currentGroup = name;
-      });
-    }
+    // The API returns products in CSV row order for the default sort.
+    // Render that sequence directly; date grouping would rearrange the CSV order.
+    visible.forEach(function (product) { body.appendChild(renderRow(product)); });
     const pages = Math.max(1, Math.ceil(total / PER_PAGE));
     empty.hidden = total > 0;
     pagination.hidden = total <= PER_PAGE;
