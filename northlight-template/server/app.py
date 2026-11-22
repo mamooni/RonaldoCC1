@@ -760,6 +760,7 @@ def _ensure_expensive_draft_fields(conn):
     """Add workflow fields and safely backfill drafts created by the old importer."""
     columns = _table_columns(conn, "expensive_product_drafts")
     definitions = {
+        "csv_position": "INT NOT NULL DEFAULT 0",
         "country_code": ("CHAR(2)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
         "refund_period": ("VARCHAR(8)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
         "blurb": ("VARCHAR(4000)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
@@ -815,6 +816,8 @@ def _ensure_expensive_catalogue_dates(conn):
         conn.execute(
             "ALTER TABLE expensive_products ADD COLUMN catalogue_date " + column_type
         )
+    if "csv_position" not in columns:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN csv_position INT NOT NULL DEFAULT 0")
 
     if DB_KIND == "mysql":
         index = conn.execute(
@@ -961,7 +964,7 @@ def _migrate(conn):
     conn.executescript(PASSWORD_RESETS_TABLE)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
-        "product_id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', "
+        "product_id TEXT PRIMARY KEY, csv_position INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', "
         "category TEXT NOT NULL DEFAULT '', intended_market TEXT NOT NULL DEFAULT '', "
         "formats TEXT NOT NULL DEFAULT '', creator TEXT NOT NULL DEFAULT '', "
         "license TEXT NOT NULL DEFAULT '', expiry TEXT NOT NULL DEFAULT '', "
@@ -3152,6 +3155,7 @@ class Handler(BaseHTTPRequestHandler):
             seen.add(public_id)
             cleaned.append({
                 "product_id": public_id,
+                "csv_position": index,
                 "title": values["Product"],
                 "category": values["Category"],
                 "intended_market": values["Intended Market"],
@@ -3177,12 +3181,12 @@ class Handler(BaseHTTPRequestHandler):
                 country_code = _country_code_from_market(draft["intended_market"])
                 conn.execute(
                     "INSERT INTO expensive_product_drafts "
-                    "(product_id, title, category, intended_market, formats, creator, "
+                    "(product_id, csv_position, title, category, intended_market, formats, creator, "
                     "license, expiry, price_usd, status, created_at, updated_at, created_by, "
                     "country_code, refund_period, blurb) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, 'Good')",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, 'Good')",
                     (
-                        draft["product_id"], draft["title"], draft["category"],
+                        draft["product_id"], draft["csv_position"], draft["title"], draft["category"],
                         draft["intended_market"], draft["formats"], draft["creator"],
                         draft["license"], draft["expiry"], draft["price_usd"],
                         now, now, admin["id"], country_code, refund_period,
@@ -3214,7 +3218,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 "SELECT product_id, title, category, intended_market, country_code, "
                 "formats, creator, license, expiry, price_usd, refund_period, blurb, "
-                "status, updated_at FROM expensive_product_drafts ORDER BY product_id"
+                "status, updated_at, csv_position FROM expensive_product_drafts ORDER BY csv_position ASC"
             ).fetchall()
         return self._json(200, {
             "drafts": [dict(row) for row in rows],
@@ -3310,9 +3314,9 @@ class Handler(BaseHTTPRequestHandler):
         errors = []
         with db(write=True) as conn:
             rows = conn.execute(
-                "SELECT product_id, title, category, intended_market, country_code, "
+                "SELECT product_id, csv_position, title, category, intended_market, country_code, "
                 "formats, creator, license, expiry, price_usd, refund_period "
-                "FROM expensive_product_drafts ORDER BY product_id"
+                "FROM expensive_product_drafts ORDER BY csv_position ASC"
             ).fetchall()
             if len(rows) != 276:
                 return self._json(400, {
@@ -3329,7 +3333,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r"[0-9]{1,64}", public_id) or public_id in seen:
                     errors.append(label + ": invalid or duplicate numeric Product ID.")
                 seen.add(public_id)
-                product = {"product_id": public_id}
+                product = {"product_id": public_id, "csv_position": int(row["csv_position"] or 0)}
                 for field, label_name in (
                     ("title", "Product"), ("category", "Category"),
                     ("intended_market", "Intended Market"), ("formats", "Format"),
@@ -3384,11 +3388,11 @@ class Handler(BaseHTTPRequestHandler):
             for product in cleaned:
                 conn.execute(
                     "INSERT INTO expensive_products "
-                    "(product_id, exp_date, title, creator, category, formats, license, "
+                    "(product_id, csv_position, exp_date, title, creator, category, formats, license, "
                     "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Good', ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Good', ?, ?, ?)",
                     (
-                        product["product_id"], product["exp_date"], product["title"],
+                        product["product_id"], product["csv_position"], product["exp_date"], product["title"],
                         product["creator"], product["category"], product["formats"],
                         product["license"], product["refund_period"], product["country_code"],
                         product["price_cents"], now, admin["id"], _lagos_catalogue_date(),
@@ -4122,12 +4126,12 @@ class Handler(BaseHTTPRequestHandler):
         fmt = val("format").lower()
         if fmt: clauses.append("LOWER(formats) LIKE ?"); args.append("%" + fmt + "%")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        order = "catalogue_date DESC, id DESC"
-        if val("sort") == "low-high": order = "price_cents ASC, catalogue_date DESC, id DESC"
-        elif val("sort") == "high-low": order = "price_cents DESC, catalogue_date DESC, id DESC"
+        order = "csv_position ASC, id ASC"
+        if val("sort") == "low-high": order = "price_cents ASC, csv_position ASC, id ASC"
+        elif val("sort") == "high-low": order = "price_cents DESC, csv_position ASC, id ASC"
         with db() as conn:
             total = conn.execute("SELECT COUNT(*) AS total FROM expensive_products" + where, tuple(args)).fetchone()["total"]
-            rows = conn.execute("SELECT id, product_id, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at, catalogue_date FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
+            rows = conn.execute("SELECT id, product_id, csv_position, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at, catalogue_date FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
             cats = conn.execute("SELECT DISTINCT category FROM expensive_products WHERE category <> '' ORDER BY category").fetchall()
             countries = conn.execute("SELECT DISTINCT country_code FROM expensive_products WHERE country_code IS NOT NULL AND country_code <> '' ORDER BY country_code").fetchall()
             expiry_rows = conn.execute("SELECT DISTINCT exp_date FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY exp_date").fetchall()
