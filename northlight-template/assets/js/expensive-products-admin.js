@@ -24,6 +24,18 @@
   const editCancelButton = document.getElementById("cancelEditExpensiveProduct");
   let editingProductId = null;
 
+  const draftTableBody = document.getElementById("expensiveDraftsBody");
+  const draftEmptyMessage = document.getElementById("expensiveDraftsEmpty");
+  const draftNote = document.getElementById("expensiveDraftNote");
+  const draftRefreshButton = document.getElementById("refreshExpensiveDrafts");
+  const draftPublishButton = document.getElementById("publishExpensiveDrafts");
+  const draftEditPanel = document.getElementById("editExpensiveDraft");
+  const draftEditForm = document.getElementById("editExpensiveDraftForm");
+  const draftEditSaveButton = document.getElementById("saveExpensiveDraft");
+  const draftEditCancelButton = document.getElementById("cancelEditExpensiveDraft");
+  let allDrafts = [];
+  let editingDraftId = null;
+
   const MAX_PRODUCTS = 5;
 
   function populateCountrySelect(select) {
@@ -468,10 +480,180 @@
           false
         );
         await loadProducts();
+        await loadDrafts();
       } catch (error) {
         showNote(error.message || "Could not import the draft inventory.", true);
       } finally {
         importButton.disabled = false;
+      }
+    });
+  }
+
+
+  function showDraftNote(message, isError) {
+    if (!draftNote) return;
+    draftNote.hidden = false;
+    draftNote.textContent = message;
+    draftNote.style.color = isError ? "#dc2626" : "";
+  }
+
+  function draftIsReady(draft) {
+    const required = ["title", "category", "intended_market", "formats", "creator", "license"];
+    if (required.some(function (field) { return !String(draft[field] || "").trim(); })) return false;
+    if (!draft.country_code || !(window.NL_COUNTRY_NAME || {})[draft.country_code]) return false;
+    if (!/^(0[1-9]|1[0-2])\/\d{4}$/.test(String(draft.expiry || ""))) return false;
+    const price = Number(draft.price_usd);
+    if (!Number.isFinite(price) || price <= 0) return false;
+    return draft.refund_period === "0" || draft.refund_period === "3";
+  }
+
+  function renderDrafts() {
+    if (!draftTableBody) return;
+    draftTableBody.replaceChildren();
+    allDrafts.forEach(function (draft) {
+      const row = document.createElement("tr");
+      addCell(row, draft.product_id);
+      addCell(row, draft.title || "—");
+      addCell(row, draft.intended_market || "—");
+      addCell(row, (window.NL_COUNTRY_NAME || {})[draft.country_code] || "Needs matching");
+      addCell(row, draft.expiry || "—");
+      addCell(row, draft.price_usd ? "$" + draft.price_usd : "—");
+      addCell(row, draft.refund_period || "—");
+      addCell(row, draftIsReady(draft) ? "Ready" : "Needs review");
+      const actionCell = document.createElement("td");
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "admin__refresh admin__product-edit";
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", function () { openEditDraft(draft); });
+      actionCell.appendChild(editButton);
+      row.appendChild(actionCell);
+      draftTableBody.appendChild(row);
+    });
+    if (draftEmptyMessage) draftEmptyMessage.hidden = allDrafts.length !== 0;
+    if (draftPublishButton) {
+      draftPublishButton.disabled = allDrafts.length !== 276;
+      draftPublishButton.textContent = allDrafts.length === 276
+        ? "Publish all 276 products"
+        : "Publish unavailable (" + allDrafts.length + "/276 drafts)";
+    }
+  }
+
+  function openEditDraft(draft) {
+    if (!draftEditForm || !draftEditPanel) return;
+    editingDraftId = draft.product_id;
+    const values = {
+      product_id: draft.product_id, title: draft.title, category: draft.category,
+      intended_market: draft.intended_market, formats: draft.formats,
+      creator: draft.creator, license: draft.license, expiry: draft.expiry,
+      price_usd: draft.price_usd, country_code: draft.country_code,
+      refund_period: draft.refund_period || "0"
+    };
+    Object.keys(values).forEach(function (key) {
+      const field = draftEditForm.elements.namedItem(key);
+      if (field) field.value = values[key] || "";
+    });
+    const countrySelect = draftEditForm.elements.namedItem("country_code");
+    if (countrySelect && countrySelect.options.length) {
+      countrySelect.options[0].textContent = "Auto-match from Intended Market";
+    }
+    draftEditPanel.hidden = false;
+    draftEditPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function loadDrafts() {
+    if (!draftTableBody) return;
+    try {
+      const response = await fetch("api/admin/expensive-products/drafts");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not load private drafts.");
+      allDrafts = Array.isArray(data.drafts) ? data.drafts : [];
+      renderDrafts();
+      showDraftNote(
+        allDrafts.length + " private draft(s) loaded. " +
+        allDrafts.filter(draftIsReady).length + " currently meet the publication checks.",
+        false
+      );
+    } catch (error) {
+      showDraftNote(error.message || "Could not load private drafts.", true);
+    }
+  }
+
+  if (draftRefreshButton) draftRefreshButton.addEventListener("click", loadDrafts);
+
+  if (draftEditForm) {
+    draftEditForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      if (!editingDraftId) return;
+      const draft = {};
+      draftEditForm.querySelectorAll("[name]").forEach(function (field) {
+        draft[field.name] = field.value.trim();
+      });
+      draft.product_id = editingDraftId;
+      draftEditSaveButton.disabled = true;
+      showDraftNote("Saving draft " + editingDraftId + "…", false);
+      try {
+        const response = await fetch("api/admin/expensive-products/drafts/update", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draft)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not save this draft.");
+        draftEditPanel.hidden = true;
+        editingDraftId = null;
+        await loadDrafts();
+        showDraftNote("Draft saved. Description remains Good.", false);
+      } catch (error) {
+        showDraftNote(error.message || "Could not save this draft.", true);
+      } finally {
+        draftEditSaveButton.disabled = false;
+      }
+    });
+  }
+
+  if (draftEditCancelButton) {
+    draftEditCancelButton.addEventListener("click", function () {
+      if (draftEditForm) draftEditForm.reset();
+      editingDraftId = null;
+      draftEditPanel.hidden = true;
+    });
+  }
+
+  if (draftPublishButton) {
+    draftPublishButton.addEventListener("click", async function () {
+      if (allDrafts.length !== 276) {
+        showDraftNote("Exactly 276 drafts are required before publishing.", true);
+        return;
+      }
+      const readyCount = allDrafts.filter(draftIsReady).length;
+      const confirmed = window.confirm(
+        "Publish all 276 premium products now?\n\n" +
+        readyCount + " currently appear ready in this panel. The server will validate every field again. " +
+        "Each product keeps its numeric ID and saved 0 or 3 refund period, and gets the description Good. " +
+        "Drafts are cleared only if all 276 products publish successfully. Customer history is preserved."
+      );
+      if (!confirmed) return;
+      draftPublishButton.disabled = true;
+      showDraftNote("Validating and publishing all 276 products… keep this page open.", false);
+      try {
+        const response = await fetch("api/admin/expensive-products/drafts/publish", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: true })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const details = Array.isArray(data.details) ? "\n" + data.details.join("\n") : "";
+          throw new Error((data.error || "Could not publish the catalogue.") + details);
+        }
+        draftEditPanel.hidden = true;
+        editingDraftId = null;
+        await loadDrafts();
+        await loadProducts();
+        showDraftNote(data.published + " products published successfully. Customer history was preserved.", false);
+      } catch (error) {
+        showDraftNote(error.message || "Could not publish the catalogue.", true);
+      } finally {
+        draftPublishButton.disabled = allDrafts.length !== 276;
       }
     });
   }
@@ -485,6 +667,13 @@
     editForm.elements.namedItem("country_code")
   );
 
+  const draftCountrySelect = draftEditForm && draftEditForm.elements.namedItem("country_code");
+  if (draftCountrySelect) {
+    populateCountrySelect(draftCountrySelect);
+    draftCountrySelect.options[0].textContent = "Auto-match from Intended Market";
+  }
+
   updateSlotControls();
   loadProducts();
+  loadDrafts();
 })();
