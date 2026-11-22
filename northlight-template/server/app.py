@@ -622,6 +622,7 @@ CREATE TABLE IF NOT EXISTS expensive_products (
     formats       TEXT NOT NULL,
     license       TEXT NOT NULL,
     refund_period TEXT NOT NULL,
+    country_code  TEXT,
     price_cents   INTEGER NOT NULL CHECK (price_cents > 0),
     blurb         TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
@@ -947,6 +948,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE expensive_products ADD COLUMN product_id TEXT")
     if "exp_date" not in product_cols:
         conn.execute("ALTER TABLE expensive_products ADD COLUMN exp_date TEXT")
+    if "country_code" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN country_code TEXT")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS expensive_products_product_id "
         "ON expensive_products(product_id)"
