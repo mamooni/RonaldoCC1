@@ -23,5 +23,9 @@
 <label class="lp-field">Publication status<select id="status"><option value="draft">Save as draft</option><option value="published">Publish now</option></select></label>
 <label class="lp-field">Description<textarea id="description" maxlength="4000" required></textarea></label></div>
 <div class="lp-actions"><button class="lp-button" type="submit">Save product</button><button class="lp-button secondary" type="button" id="resetForm">Clear form</button></div></form><p id="lpMessage" role="status"></p></section>
+<section class="lp-panel" id="csvImportPanel"><h2>Bulk import from CSV</h2>
+<p>Upload your edited catalogue CSV to preview it before importing. Every imported item is forced to <strong>Draft</strong>, even if the CSV status column says published.</p>
+<div class="lp-actions"><input id="csvFile" type="file" accept=".csv,text/csv"><button class="lp-button secondary" id="previewCsv" type="button">Preview CSV</button><button class="lp-button" id="importCsv" type="button" disabled>Import drafts</button></div>
+<p id="csvMessage" role="status" aria-live="polite"></p><div id="csvPreview"></div></section>
 <section class="lp-panel"><h2>Saved products</h2><div id="productList" class="lp-list">Loading products…</div></section>
 </main><script src="assets/js/legitimate-admin.js" defer></script></body></html>
