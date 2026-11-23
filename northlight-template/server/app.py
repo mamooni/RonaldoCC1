@@ -2040,6 +2040,8 @@ POST_ROUTES = {
     "/api/cheap-product-checkout": "api_cheap_product_checkout",
     "/api/expensive-product-checkout": "api_expensive_product_checkout",
     "/api/expensive-product-name": "api_expensive_product_name",
+    "/api/legitimate-product-checkout": "api_legitimate_product_checkout",
+    "/api/legitimate-product-name": "api_legitimate_product_name",
     "/api/admin/payment": "api_admin_payment",
     "/api/admin/expensive-products": "api_admin_expensive_products",
     "/api/admin/expensive-products/import-draft": "api_admin_import_expensive_draft",
@@ -2062,6 +2064,7 @@ GET_ROUTES = (
     "/api/postcode",
     "/api/bundles",
     "/api/expensive-product-orders",
+    "/api/legitimate-product-orders",
 )
 
 page_throttle = SlidingWindow(_limit("NL_PAGE_LIMIT", 300), 60, "pages")  # per IP
@@ -2328,6 +2331,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_orders()
         if path == "/api/expensive-product-orders":
             return self.api_expensive_product_orders()
+        if path == "/api/legitimate-product-orders":
+            return self.api_legitimate_product_orders()
         if path == "/api/payments":
             return self.api_my_payments()
         if path == "/api/admin/data":
@@ -4950,6 +4955,314 @@ class Handler(BaseHTTPRequestHandler):
                 item_rows = conn.execute(
                     "SELECT order_id, product_id, title, price_cents, quantity "
                     "FROM expensive_product_order_items "
+                    f"WHERE order_id IN ({placeholders}) ORDER BY id",
+                    tuple(order_ids),
+                ).fetchall()
+
+                items_by_order = {}
+                for item in item_rows:
+                    items_by_order.setdefault(item["order_id"], []).append({
+                        "product_id": item["product_id"],
+                        "title": item["title"],
+                        "price": dollars(item["price_cents"]),
+                        "quantity": item["quantity"],
+                    })
+
+                for row in rows:
+                    orders.append({
+                        "id": row["id"],
+                        "total": dollars(row["total_cents"]),
+                        "full_name": row["full_name"],
+                        "status": row["status"],
+                        "created_at": row["created_at"],
+                        "items": items_by_order.get(row["id"], []),
+                    })
+
+        return self._json(200, {"orders": orders})
+    
+    
+    
+    def api_legitimate_product_checkout(self, payload):
+        """Charge the wallet and create an isolated legitimate-catalogue order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+        
+        request_key = str(payload.get("request_key") or "").strip()
+        if not re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+            request_key,
+        ):
+            return self._json(400, {"error": "Invalid request key."})
+
+        items = payload.get("items")
+
+        
+        if not isinstance(items, list) or not items or len(items) > 50:
+            return self._json(400, {"error": "Invalid order items."})
+
+        quantities = {}
+        for item in items:
+            if not isinstance(item, dict):
+                return self._json(400, {"error": "Invalid order item."})
+
+            raw_product_id = item.get("product_id")
+            raw_quantity = item.get("quantity", 1)
+
+            if (
+                isinstance(raw_product_id, bool)
+                or isinstance(raw_quantity, bool)
+                or not isinstance(raw_product_id, int)
+                or not isinstance(raw_quantity, int)
+            ):
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            product_id = raw_product_id
+            quantity = raw_quantity
+
+            if product_id <= 0 or quantity < 1 or quantity > 20:
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            if product_id in quantities:
+                return self._json(400, {"error": "Duplicate products are not allowed."})
+
+            quantities[product_id] = quantity
+
+        product_ids = list(quantities)
+        placeholders = ",".join("?" for _ in product_ids)
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            # Lock this customer's wallet row until the transaction finishes.
+            if DB_KIND == "mysql":
+                conn.execute(
+                    "SELECT id FROM users WHERE id = ? FOR UPDATE",
+                    (user["id"],),
+                ).fetchone()
+
+            existing = conn.execute(
+                "SELECT id, total_cents, status, created_at "
+                "FROM legitimate_product_orders "
+                "WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone()
+
+            if existing is not None:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+
+                return self._json(200, {
+                    "success": True,
+                    "duplicate": True,
+                    "order_id": existing["id"],
+                    "total": dollars(existing["total_cents"]),
+                    "status": existing["status"],
+                    "balance": dollars(balance_row["balance_cents"]),
+                })
+
+            products = conn.execute(
+                "SELECT id, name AS title, price_cents FROM legitimate_products "
+                f"WHERE id IN ({placeholders})",
+                tuple(product_ids),
+            ).fetchall()
+
+            product_map = {row["id"]: row for row in products}
+
+            if len(product_map) != len(product_ids):
+                return self._json(404, {
+                    "error": "One or more products are no longer available."
+                })
+
+            total_cents = 0
+            order_items = []
+
+            for product_id, quantity in quantities.items():
+                product = product_map[product_id]
+                price_cents = int(product["price_cents"])
+
+                if price_cents <= 0:
+                    return self._json(400, {"error": "Invalid product price."})
+
+                line_total = price_cents * quantity
+
+                if (
+                    line_total > 9_000_000_000_000_000
+                    or total_cents > 9_000_000_000_000_000 - line_total
+                ):
+                    return self._json(400, {"error": "Order total is too large."})
+
+                total_cents += line_total
+                order_items.append((
+                    product_id,
+                    product["title"],
+                    price_cents,
+                    quantity,
+                ))
+
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (total_cents, user["id"], total_cents),
+            )
+
+            if paid.rowcount != 1:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+                balance = balance_row["balance_cents"] if balance_row else 0
+
+                return self._json(402, {
+                    "error": "Insufficient funds.",
+                    "balance": dollars(balance),
+                    "total": dollars(total_cents),
+                    "missing": dollars(max(0, total_cents - balance)),
+                })
+
+            cursor = conn.execute(
+                "INSERT INTO legitimate_product_orders "
+                "(user_id, request_key, total_cents, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    user["id"],
+                    request_key,
+                    total_cents,
+                    "awaiting_customer_name",
+                    now,
+                ),
+            )
+            order_id = cursor.lastrowid
+
+            for product_id, title, price_cents, quantity in order_items:
+                conn.execute(
+                    "INSERT INTO legitimate_product_order_items "
+                    "(order_id, product_id, title, price_cents, quantity) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (order_id, product_id, title, price_cents, quantity),
+                )
+
+            balance_row = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?",
+                (user["id"],),
+            ).fetchone()
+            balance = balance_row["balance_cents"]
+
+            audit(
+                conn,
+                "legitimate_product_checkout",
+                actor=user,
+                target=str(order_id),
+                detail=f"Order {order_id}: {dollars(total_cents):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(201, {
+            "success": True,
+            "order_id": order_id,
+            "total": dollars(total_cents),
+            "balance": dollars(balance),
+            "status": "awaiting_customer_name",
+        })
+
+    
+    def api_legitimate_product_name(self, payload):
+        """Save the customer's name against a paid legitimate-catalogue order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        raw_order_id = payload.get("order_id")
+        raw_full_name = payload.get("full_name")
+
+        if (
+            isinstance(raw_order_id, bool)
+            or not isinstance(raw_order_id, int)
+            or raw_order_id <= 0
+            or not isinstance(raw_full_name, str)
+        ):
+            return self._json(400, {"error": "Please enter a valid order and full name."})
+
+        order_id = raw_order_id
+        full_name = raw_full_name.strip()
+
+        if (
+            len(full_name) < 2
+            or len(full_name) > 190
+            or any(ord(char) < 32 for char in full_name)
+        ):
+            return self._json(400, {"error": "Please enter a valid full name."})
+
+        with db(write=True) as conn:
+            order = conn.execute(
+                "SELECT id, status, full_name FROM legitimate_product_orders "
+                "WHERE id = ? AND user_id = ?",
+                (order_id, user["id"]),
+            ).fetchone()
+
+            if order is None:
+                return self._json(404, {"error": "Order not found."})
+
+            if order["status"] == "awaiting_customer_name":
+                conn.execute(
+                    "UPDATE legitimate_product_orders "
+                    "SET full_name = ?, status = 'awaiting_fulfilment' "
+                    "WHERE id = ? AND user_id = ? "
+                    "AND status = 'awaiting_customer_name'",
+                    (full_name, order_id, user["id"]),
+                )
+
+                audit(
+                    conn,
+                    "legitimate_product_customer_name",
+                    actor=user,
+                    target=str(order_id),
+                    detail="Customer name saved for order",
+                    ip=self.client_address[0],
+                )
+
+            elif order["full_name"] != full_name:
+                return self._json(409, {
+                    "error": "A name has already been submitted for this order."
+                })
+
+        return self._json(200, {
+            "success": True,
+            "message": "Your name has been saved. Please contact Northlight Support to receive your goods.",
+            "status": (
+                "awaiting_fulfilment"
+                if order["status"] == "awaiting_customer_name"
+                else order["status"]
+            ),
+        })
+
+    
+    def api_legitimate_product_orders(self):
+        """Return the signed-in customer's legitimate catalogue orders."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, total_cents, full_name, status, created_at "
+                "FROM legitimate_product_orders "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT 100",
+                (user["id"],),
+            ).fetchall()
+
+            orders = []
+            if rows:
+                order_ids = [row["id"] for row in rows]
+                placeholders = ",".join("?" for _ in order_ids)
+
+                item_rows = conn.execute(
+                    "SELECT order_id, product_id, title, price_cents, quantity "
+                    "FROM legitimate_product_order_items "
                     f"WHERE order_id IN ({placeholders}) ORDER BY id",
                     tuple(order_ids),
                 ).fetchall()
