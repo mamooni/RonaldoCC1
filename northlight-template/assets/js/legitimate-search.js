@@ -36,7 +36,23 @@ function render(){
  els.pager.innerHTML="";
  if(pages>1){for(let n=1;n<=pages;n++){const b=document.createElement("button");b.type="button";b.textContent=String(n);if(n===page)b.setAttribute("aria-current","page");b.addEventListener("click",()=>{page=n;render();});els.pager.appendChild(b);}}
 }
-document.addEventListener("click",e=>{const add=e.target.closest("[data-legit-add]");const buy=e.target.closest("[data-legit-buy]");const btn=add||buy;if(!btn)return;const key=btn.getAttribute("data-legit-add")||btn.getAttribute("data-legit-buy");const product=products.find(p=>String(p.id||p.product_code)===String(key));if(!product||!window.NLLegitCart)return;window.NLLegitCart.add({key:String(product.id||product.product_code),title:product.name,price:product.price});if(buy)window.location.href="legitimate-checkout.html?product="+encodeURIComponent(product.id);else{const old=btn.textContent;btn.textContent="Added";btn.disabled=true;setTimeout(()=>{btn.textContent=old;btn.disabled=false;},900);}});
+document.addEventListener("click",e=>{
+ const add=e.target.closest("[data-legit-add]");
+ const buy=e.target.closest("[data-legit-buy]");
+ if(!add&&!buy)return;
+ const btn=add||buy,key=btn.getAttribute(add?"data-legit-add":"data-legit-buy");
+ const product=products.find(p=>String(p.id||p.product_code)===String(key));
+ if(!product)return;
+ if(buy){
+  if(!product.id){els.status.textContent="This product cannot be checked out right now.";return;}
+  window.location.href="legitimate-checkout.html?product="+encodeURIComponent(product.id);
+  return;
+ }
+ if(!window.NLLegitCart)return;
+ window.NLLegitCart.add({key:String(product.id||product.product_code),title:product.name,price:product.price});
+ const old=btn.textContent;btn.textContent="Added";btn.disabled=true;
+ setTimeout(()=>{btn.textContent=old;btn.disabled=false;},900);
+});
 function updateMarkets(){
  const current=els.market.value,markets=[...new Set(products.map(p=>clean(p.market)).filter(Boolean))].sort();
  els.market.innerHTML='<option value="">All countries</option>'+markets.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
