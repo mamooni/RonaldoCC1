@@ -22,6 +22,23 @@ function parseCsv(text){
  if(quoted)throw new Error("CSV contains an unclosed quoted field.");if(field!==""||row.length){row.push(field);rows.push(row);}return rows.filter(r=>r.some(v=>String(v).trim()!==""));
 }
 function resetCsv(){csvRows=[];csvPreview.innerHTML="";importButton.disabled=true;}
+function normalizeFormat(value){
+ const v=String(value||"").trim().toLowerCase();
+ if(["digital","digital product","digital download","download","ebook","e-book","software","template","file"].includes(v))return "digital";
+ if(["physical","physical product","hard copy","printed","print"].includes(v))return "physical";
+ if(["service","services","online service"].includes(v))return "service";
+ return v;
+}
+function normalizeExpiry(value){
+ const v=String(value||"").trim();
+ let m=v.match(/^(0?[1-9]|1[0-2])[\/. -](\d{2}|\d{4})$/);
+ if(m)return String(m[1]).padStart(2,"0")+"/"+(m[2].length===2?"20"+m[2]:m[2]);
+ m=v.match(/^(\d{4})-(0?[1-9]|1[0-2])(?:-\d{1,2})?$/);
+ if(m)return String(m[2]).padStart(2,"0")+"/"+m[1];
+ m=v.match(/^(0?[1-9]|1[0-2])-(\d{4})-(?:\d{1,2})$/);
+ if(m)return String(m[1]).padStart(2,"0")+"/"+m[2];
+ return v;
+}
 const expected=["product","market","state","format","seller","quality","price","id","expiry","status","intended_country","refund_period","description"];
 previewButton.addEventListener("click",async()=>{
  resetCsv();csvMessage.textContent="";const file=csvFile.files&&csvFile.files[0];if(!file){csvMessage.textContent="Choose a CSV file first.";return;}if(file.size>120*1024){csvMessage.textContent="CSV is too large. Keep it under 120 KB.";return;}
@@ -30,7 +47,7 @@ previewButton.addEventListener("click",async()=>{
   if(headers.length!==expected.length||expected.some((h,i)=>headers[i]!==h))throw new Error("CSV headers must be exactly: Product, Market, State, Format, Seller, Quality, Price, ID, Expiry, Status, Intended country, Refund period, Description.");
   if(!parsed.length)throw new Error("The CSV has no product rows.");if(parsed.length>200)throw new Error("Maximum 200 product rows per import.");
   const malformed=parsed.findIndex(values=>values.length!==expected.length);if(malformed!==-1)throw new Error("CSV row "+(malformed+2)+" does not contain exactly "+expected.length+" columns.");
-  csvRows=parsed.map((values,index)=>{const row={};expected.forEach((key,i)=>row[key]=String(values[i]??"").trim());return {...row,_row:index+2};});
+  csvRows=parsed.map((values,index)=>{const row={};expected.forEach((key,i)=>row[key]=String(values[i]??"").trim());row.format=normalizeFormat(row.format);row.expiry=normalizeExpiry(row.expiry);row.quality=row.quality||"Very High";row.status="Draft";return {...row,_row:index+2};});
   const errors=[];const ids=new Set();csvRows.forEach(r=>{if(!r.product||!r.market||!r.state||!r.seller||!r.price||!r.expiry||!r.description)errors.push("Row "+r._row+": missing required field");if(r.quality!=="Very High")errors.push("Row "+r._row+": quality must be Very High");if(!/^(42|47|51|34|37)\d{4}$/.test(r.id))errors.push("Row "+r._row+": ID must be six digits with an approved prefix");if(ids.has(r.id))errors.push("Row "+r._row+": duplicate ID in file");ids.add(r.id);if(countryCodes[r.market]!==String(r.intended_country).toUpperCase())errors.push("Row "+r._row+": intended country does not match Market");if(!/^(0[1-9]|1[0-2])\/\d{4}$/.test(r.expiry))errors.push("Row "+r._row+": Expiry must be MM/YYYY");if(!["0","3"].includes(r.refund_period))errors.push("Row "+r._row+": refund period must be 0 or 3");if(!["digital","physical","service"].includes(r.format.toLowerCase()))errors.push("Row "+r._row+": invalid format");});
   const preview=csvRows.slice(0,8);csvPreview.innerHTML='<p><strong>'+csvRows.length+' rows loaded.</strong> Showing first '+preview.length+'. '+(errors.length?errors.length+' validation issue(s) found.':'All client-side checks passed; the server will validate again.')+'</p><div style="overflow-x:auto"><table><thead><tr><th>Row</th><th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>Address</th><th>Refund</th><th>Price</th></tr></thead><tbody>'+preview.map(r=>'<tr><td>'+r._row+'</td><td>'+esc(r.product)+'</td><td>'+esc(r.seller)+'</td><td>'+esc(r.quality)+'</td><td>'+esc(r.id)+'</td><td>'+esc(r.market+', '+r.state)+'</td><td>'+esc(r.refund_period)+'</td><td>'+esc(r.price)+'</td></tr>').join("")+'</tbody></table></div>'+(errors.length?'<h3>Validation issues</h3><ul>'+errors.slice(0,30).map(e=>'<li>'+esc(e)+'</li>').join("")+'</ul>':'');
   importButton.disabled=errors.length>0;csvMessage.textContent=errors.length?"Correct the listed issues before importing.":"Preview ready. All rows will be imported as drafts.";
