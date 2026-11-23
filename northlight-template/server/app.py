@@ -4859,7 +4859,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(items) > 200:
             return self._error(400, "A single import is limited to 200 products.")
 
-        required = ("name", "description", "category", "format", "seller", "price", "image_url")
+        required = ("name", "description", "category", "seller", "image_url")
         limits = {"name": 160, "description": 4000, "category": 100, "seller": 100, "image_url": 1000}
         clean_items, errors = [], []
         for index, item in enumerate(items, start=2):
