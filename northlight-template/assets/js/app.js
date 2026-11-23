@@ -105,7 +105,14 @@
     const table = make("table", "specs specs--boxed");
     const body = make("tbody");
 
-    body.appendChild(specRow("Country", clean(product.market) || "Not specified"));
+    const countryCode = clean(product.intended_country).toUpperCase();
+    const countryFlag = /^[A-Z]{2}$/.test(countryCode)
+      ? String.fromCodePoint(...[...countryCode].map(char => 127397 + char.charCodeAt(0)))
+      : "";
+    body.appendChild(specRow(
+      "Country",
+      (countryFlag ? countryFlag + "  " : "") + (clean(product.market) || "Not specified")
+    ));
     body.appendChild(specRow("Description", clean(product.description) || "No description provided."));
     const refundable = Number(product.refund_period ?? 0) > 0;
     body.appendChild(specRow("Refundable", refundable ? "Yes" : "No", refundable ? "specs__val--yes" : "specs__val--no"));
