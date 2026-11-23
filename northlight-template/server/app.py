@@ -2960,6 +2960,25 @@ class Handler(BaseHTTPRequestHandler):
                 "ORDER BY i.id"
             ).fetchall()
 
+            legitimate_order_rows = conn.execute(
+                "SELECT o.id, o.user_id, u.username, o.total_cents, "
+                "o.full_name, o.status, o.created_at "
+                "FROM legitimate_product_orders o "
+                "JOIN users u ON u.id = o.user_id "
+                "ORDER BY o.id DESC LIMIT 200"
+            ).fetchall()
+
+            legitimate_item_rows = conn.execute(
+                "SELECT i.order_id, i.title, i.price_cents, i.quantity "
+                "FROM legitimate_product_order_items i "
+                "JOIN legitimate_product_orders o ON o.id = i.order_id "
+                "WHERE o.id IN ("
+                "SELECT id FROM legitimate_product_orders "
+                "ORDER BY id DESC LIMIT 200"
+                ") "
+                "ORDER BY i.id"
+            ).fetchall()
+
         cheap_items_by_order = {}
         for item in cheap_item_rows:
             cheap_items_by_order.setdefault(item["order_id"], []).append({
@@ -2998,6 +3017,27 @@ class Handler(BaseHTTPRequestHandler):
                 "status": order["status"],
                 "created_at": order["created_at"],
                 "items": expensive_items_by_order.get(order["id"], []),
+            })
+
+        legitimate_items_by_order = {}
+        for item in legitimate_item_rows:
+            legitimate_items_by_order.setdefault(item["order_id"], []).append({
+                "title": item["title"],
+                "price": dollars(item["price_cents"]),
+                "quantity": item["quantity"],
+            })
+
+        legitimate_orders = []
+        for order in legitimate_order_rows:
+            legitimate_orders.append({
+                "id": order["id"],
+                "user_id": order["user_id"],
+                "username": order["username"],
+                "total": dollars(order["total_cents"]),
+                "full_name": order["full_name"],
+                "status": order["status"],
+                "created_at": order["created_at"],
+                "items": legitimate_items_by_order.get(order["id"], []),
             })
 
         users = []
@@ -3051,6 +3091,7 @@ class Handler(BaseHTTPRequestHandler):
             "payments": payments,
             "cheap_orders": cheap_orders,
             "expensive_orders": expensive_orders,
+            "legitimate_orders": legitimate_orders,
         })
 
     def api_admin_payment(self, payload):
