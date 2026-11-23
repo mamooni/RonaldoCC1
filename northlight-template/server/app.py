@@ -1996,6 +1996,7 @@ POST_ROUTES = {
     "/api/admin/legitimate-products": "api_admin_legitimate_products",
     "/api/admin/legitimate-products/import": "api_admin_import_legitimate_products",
     "/api/admin/legitimate-products/publish-import": "api_admin_publish_legitimate_import",
+    "/api/admin/legitimate-products/publish-all-drafts": "api_admin_publish_all_legitimate_drafts",
 }
 
 GET_ROUTES = (
@@ -5121,6 +5122,53 @@ class Handler(BaseHTTPRequestHandler):
                 audit(conn, "legitimate_product.publish", actor=admin, target=str(product_id),
                       detail="published from validated CSV import; standalone catalogue", ip=self.client_address[0])
         return self._json(200, {"ok": True, "published": len(product_ids), "ids": product_ids})
+
+    def api_admin_publish_all_legitimate_drafts(self, payload):
+        """Validate and publish every draft in the isolated legitimate catalogue atomically."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, market, state, product_code, expiry, "
+                "intended_country, refund_period, price_cents FROM legitimate_products WHERE status = 'draft' "
+                "ORDER BY id"
+            ).fetchall()
+            if not rows:
+                return self._json(200, {"ok": True, "published": 0, "message": "There are no draft products."})
+
+            country_codes = self._legitimate_country_codes()
+            market_states = self._legitimate_market_states()
+            invalid_ids = []
+            for row in rows:
+                market_key = str(row["market"]).lower()
+                if (not row["name"] or not row["description"] or not row["format"] or not row["seller"]
+                    or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
+                    or country_codes.get(market_key) != str(row["intended_country"]).upper()
+                    or row["state"] not in market_states.get(market_key, set())
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\\d{4}", str(row["expiry"]))
+                    or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
+                    invalid_ids.append(int(row["id"]))
+
+            if invalid_ids:
+                return self._json(409, {
+                    "error": "Some drafts failed publication checks. Nothing was published.",
+                    "invalid_count": len(invalid_ids),
+                    "invalid_ids": invalid_ids[:25],
+                })
+
+            conn.execute(
+                "UPDATE legitimate_products SET status = 'published', updated_at = ? WHERE status = 'draft'",
+                (now,),
+            )
+            for row in rows:
+                audit(conn, "legitimate_product.publish", actor=admin, target=str(row["id"]),
+                      detail="published from bulk publish-all; standalone catalogue", ip=self.client_address[0])
+
+        return self._json(200, {"ok": True, "published": len(rows), "message": "All validated drafts are now published."})
 
     def api_admin_legitimate_products(self, payload):
         admin = self._require_admin()
