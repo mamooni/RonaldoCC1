@@ -30,7 +30,7 @@
 <label class="lp-field" style="grid-column:1/-1">Description<textarea id="description" maxlength="4000" required>Good</textarea></label>
 </div><div class="lp-actions"><button class="lp-button" type="submit">Save product</button><button class="lp-button secondary" type="button" id="resetForm">Clear form</button></div></form><p id="lpMessage" role="status"></p></section>
 <section class="lp-panel" id="csvImportPanel"><h2>Bulk import from CSV</h2>
-<p>Expected columns: Product, Market, State, Format, Seller, Quality, Price, ID, Expiry, Status, Intended country, Refund period, Description. Imported products are always saved as <strong>Draft</strong>.</p>
+<p>Expected columns: Product, Market, State, Format, Seller, Quality, Price, ID, Expiry, Status, Intended country, Refund period, Description. Imported products are first saved as drafts. After a successful import, you can confirm publishing those exact new rows.</p>
 <p><a href="legitimate-digital-goods-200-draft.csv" download>Download the 200-row draft sample CSV</a></p>
 <div class="lp-actions"><input id="csvFile" type="file" accept=".csv,text/csv"><button class="lp-button secondary" id="previewCsv" type="button">Preview CSV</button><button class="lp-button" id="importCsv" type="button" disabled>Import drafts</button></div>
 <p id="csvMessage" role="status" aria-live="polite"></p><div id="csvPreview"></div></section>
