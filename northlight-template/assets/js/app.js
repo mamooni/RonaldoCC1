@@ -89,12 +89,14 @@
     head.id = headId;
     head.setAttribute("aria-expanded", "false");
     head.setAttribute("aria-controls", panelId);
-    head.appendChild(make("span", "drop__title", clean(product.name) || "Untitled product"));
+    const heading = make("span", "drop__heading");
+    heading.appendChild(make("span", "drop__title", clean(product.name) || "Untitled product"));
 
     const from = make("span", "drop__from");
     from.appendChild(document.createTextNode("From "));
     from.appendChild(make("b", "", clean(product.seller) || "Unknown seller"));
-    head.appendChild(from);
+    heading.appendChild(from);
+    head.appendChild(heading);
 
     const chevron = make("span", "chevron");
     chevron.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 16.4 5.6 8.6h12.8z"/></svg>';
