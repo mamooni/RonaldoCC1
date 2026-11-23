@@ -4961,7 +4961,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
                 "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
-                "FROM legitimate_products ORDER BY created_at DESC, id DESC"
+                "FROM legitimate_products ORDER BY id ASC"
             ).fetchall()
         return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
 
