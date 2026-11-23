@@ -1995,6 +1995,7 @@ POST_ROUTES = {
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
     "/api/admin/legitimate-products": "api_admin_legitimate_products",
     "/api/admin/legitimate-products/import": "api_admin_import_legitimate_products",
+    "/api/admin/legitimate-products/publish-import": "api_admin_publish_legitimate_import",
 }
 
 GET_ROUTES = (
@@ -5047,7 +5048,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "No valid rows to import.", "errors": errors})
 
         now = int(time.time())
-        imported, duplicates = 0, []
+        imported, duplicates, imported_ids = 0, [], []
         with db(write=True) as conn:
             for clean, refund, price_cents, row_number in clean_items:
                 exists = conn.execute(
@@ -5066,12 +5067,60 @@ class Handler(BaseHTTPRequestHandler):
                      clean["intended_country"].upper(), refund, price_cents, now, now, admin["id"]),
                 )
                 imported += 1
+                imported_ids.append(int(cursor.lastrowid))
                 audit(conn, "legitimate_product.import", actor=admin, target=str(cursor.lastrowid),
                       detail="CSV import; forced draft; row=" + str(row_number), ip=self.client_address[0])
         return self._json(200, {
-            "ok": True, "imported": imported, "duplicates": duplicates,
+            "ok": True, "imported": imported, "imported_ids": imported_ids, "duplicates": duplicates,
             "errors": errors, "message": "Imported products are saved as drafts. Nothing was published."
         })
+
+
+    def api_admin_publish_legitimate_import(self, payload):
+        """Publish only the rows returned by the immediately preceding CSV import."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not ids or len(ids) > 200:
+            return self._error(400, "Provide the imported product IDs to publish (1–200).")
+        try:
+            product_ids = [int(value) for value in ids]
+            if any(value < 1 for value in product_ids) or len(set(product_ids)) != len(product_ids):
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._error(400, "The imported product IDs are invalid.")
+        placeholders = ",".join("?" for _ in product_ids)
+        now = int(time.time())
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, market, state, product_code, expiry, "
+                "intended_country, refund_period, price_cents FROM legitimate_products "
+                "WHERE id IN (" + placeholders + ") AND status = 'draft'",
+                tuple(product_ids),
+            ).fetchall()
+            if len(rows) != len(product_ids):
+                return self._error(409, "Some imported rows are missing or are no longer drafts. Nothing was published.")
+            country_codes = self._legitimate_country_codes()
+            for row in rows:
+                market_key = str(row["market"]).lower()
+                if (not row["name"] or not row["description"] or not row["format"] or not row["seller"]
+                    or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
+                    or country_codes.get(market_key) != str(row["intended_country"]).upper()
+                    or row["state"] not in self._legitimate_market_states().get(market_key, set())
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\\d{4}", str(row["expiry"]))
+                    or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
+                    return self._error(409, "An imported row failed the publication checks. Nothing was published.")
+            conn.execute(
+                "UPDATE legitimate_products SET status = 'published', updated_at = ? "
+                "WHERE id IN (" + placeholders + ") AND status = 'draft'",
+                (now, *product_ids),
+            )
+            for product_id in product_ids:
+                audit(conn, "legitimate_product.publish", actor=admin, target=str(product_id),
+                      detail="published from validated CSV import; standalone catalogue", ip=self.client_address[0])
+        return self._json(200, {"ok": True, "published": len(product_ids), "ids": product_ids})
 
     def api_admin_legitimate_products(self, payload):
         admin = self._require_admin()
