@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Search Products</title>
+  <meta name="description" content="Browse and search legitimate products in the Northlight catalogue.">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <style>
+    .catalogue{width:min(1200px,calc(100% - 32px));margin:36px auto 64px}
+    .catalogue__intro{margin-bottom:22px}
+    .catalogue__intro h1{margin:0 0 8px;font-size:clamp(1.6rem,3vw,2.2rem)}
+    .catalogue__intro p{margin:0;color:var(--muted,#8b929d)}
+    .catalogue__filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto;gap:12px;align-items:end;padding:18px;border:1px solid var(--line,#2a303a);border-radius:14px;background:var(--surface,#151a22);margin-bottom:20px}
+    .catalogue__table-wrap{width:100%;overflow-x:auto;border:1px solid var(--line,#2a303a);border-radius:12px;background:var(--surface,#151a22)}
+    .catalogue__table{width:100%;border-collapse:collapse;min-width:1050px;text-align:left}
+    .catalogue__table th,.catalogue__table td{padding:14px 12px;border-bottom:1px solid var(--line,#2a303a);vertical-align:middle}
+    .catalogue__table th{font-size:.82rem;color:var(--muted,#a1a8b3);white-space:nowrap}
+    .catalogue__table td{font-size:.9rem}
+    .catalogue__table tbody tr:last-child td{border-bottom:0}
+    .catalogue__table .product-name{font-weight:650;min-width:190px}
+    .catalogue__table .price{font-weight:750;white-space:nowrap}
+    .catalogue__table .quality{white-space:nowrap}
+    .catalogue__table .product-id{font-variant-numeric:tabular-nums;white-space:nowrap}
+    .catalogue__field{display:grid;gap:7px;min-width:0}
+    .catalogue__field label{font-size:.82rem;color:var(--muted,#a1a8b3)}
+    .catalogue__field input,.catalogue__field select{width:100%;min-height:42px;padding:9px 11px;border:1px solid var(--line,#343b47);border-radius:8px;background:var(--bg,#10141b);color:inherit}
+    .catalogue__meta{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:18px 0;color:var(--muted,#a1a8b3);font-size:.9rem}
+    .catalogue__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .product-card{min-width:0;overflow:hidden;border:1px solid var(--line,#2a303a);border-radius:14px;background:var(--surface,#151a22)}
+    .product-card__image{height:170px;background:var(--bg,#10141b);display:grid;place-items:center;color:var(--muted,#a1a8b3);overflow:hidden}
+    .product-card__image img{width:100%;height:100%;object-fit:cover}
+    .product-card__body{padding:15px}
+    .product-card__eyebrow{font-size:.76rem;color:var(--muted,#a1a8b3);margin-bottom:7px}
+    .product-card h2{font-size:1.05rem;margin:0 0 8px}
+    .product-card p{font-size:.9rem;color:var(--muted,#a1a8b3);margin:0 0 14px;line-height:1.5}
+    .product-card__foot{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .product-card__price{font-weight:700}
+    .catalogue__empty{padding:38px 18px;text-align:center;border:1px dashed var(--line,#343b47);border-radius:12px;color:var(--muted,#a1a8b3);grid-column:1/-1}
+    .catalogue__pager{display:flex;justify-content:center;gap:8px;margin-top:22px}
+    .catalogue__pager button{padding:8px 13px;border:1px solid var(--line,#343b47);border-radius:8px;background:var(--surface,#151a22);color:inherit;cursor:pointer}
+    .catalogue__pager button[aria-current="page"]{border-color:var(--accent,#7c8cff)}
+    @media(max-width:850px){.catalogue__filters{grid-template-columns:repeat(2,minmax(0,1fr))}.catalogue__filters .catalogue__field:first-child{grid-column:1/-1}}
+    @media(max-width:560px){.catalogue__filters{grid-template-columns:1fr}.catalogue__filters .catalogue__field:first-child{grid-column:auto}.catalogue__meta{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="topbar__logo" href="index.html" aria-label="Home"><img src="logo.png" alt="Northlight" class="topbar__logo-img"></a>
+      <div class="topbar__actions">
+        <a class="btn btn--primary" href="index.html">Home</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="catalogue">
+    <header class="catalogue__intro">
+      <h1>Browse products</h1>
+      <p>Search the catalogue for legitimate digital and physical products.</p>
+    </header>
+
+    <form class="catalogue__filters" id="catalogueFilters">
+      <div class="catalogue__field"><label for="productQuery">Search products</label><input id="productQuery" type="search" placeholder="Search product or seller" autocomplete="off"></div>
+      <div class="catalogue__field"><label for="productMarket">Market</label><select id="productMarket"><option value="">All countries</option></select></div>
+      <div class="catalogue__field"><label for="productFormat">Format</label><select id="productFormat"><option value="">All formats</option><option value="physical">Physical</option><option value="digital">Digital</option><option value="service">Service</option></select></div>
+      <div class="catalogue__field"><label for="productSort">Sort by</label><select id="productSort"><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="name">Name: A to Z</option></select></div>
+      <div class="catalogue__field"><label for="minPrice">Minimum price (USD)</label><input id="minPrice" type="number" min="0" step="0.01" placeholder="0"></div>
+      <div class="catalogue__field"><label for="maxPrice">Maximum price (USD)</label><input id="maxPrice" type="number" min="0" step="0.01" placeholder="No limit"></div>
+      <div class="catalogue__field"><label for="productPageSize">Rows per page</label><select id="productPageSize"><option>10</option><option>25</option><option>50</option></select></div>
+      <button class="btn" type="reset" id="resetFilters">Clear filters</button>
+    </form>
+
+    <div class="catalogue__meta">
+      <span id="resultCount" aria-live="polite">Loading products…</span>
+      <span id="catalogueStatus" role="status"></span>
+    </div>
+    <div class="catalogue__table-wrap"><table class="catalogue__table" aria-label="Products"><thead><tr>
+      <th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th>
+    </tr></thead><tbody id="productRows"><tr><td colspan="8" class="catalogue__empty">Loading the product catalogue…</td></tr></tbody></table></div>
+    <nav class="catalogue__pager" id="productPager" aria-label="Product pages"></nav>
+  </main>
+
+  <script src="assets/js/legitimate-search.js" defer></script>
+</body>
+</html>
