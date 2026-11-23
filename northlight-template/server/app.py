@@ -352,7 +352,7 @@ CREATE TABLE IF NOT EXISTS legitimate_products (
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     category TEXT NOT NULL,
-    format TEXT NOT NULL CHECK (format IN ('physical', 'digital', 'service')),
+    format TEXT NOT NULL,
     seller TEXT NOT NULL DEFAULT '',
     quality TEXT NOT NULL DEFAULT 'Very High',
     market TEXT NOT NULL DEFAULT '',
@@ -1009,6 +1009,7 @@ def _migrate(conn):
 
     conn.executescript(PAYMENTS_TABLE)
     _ensure_legitimate_catalogue_columns(conn)
+    _migrate_legitimate_format_values(conn)
     conn.executescript(PURCHASES_TABLE)
     conn.executescript(CHEAP_PRODUCT_ORDERS_TABLE)
     conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
@@ -1040,6 +1041,60 @@ def _migrate(conn):
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, created_by INTEGER)"
     )
     _ensure_expensive_draft_fields(conn)
+
+
+
+def _migrate_legitimate_format_values(conn):
+    """Remove the old fixed-format constraint while preserving catalogue rows."""
+    if DB_KIND == "mysql":
+        try:
+            conn.execute("ALTER TABLE legitimate_products DROP CHECK legitimate_products_format")
+        except Exception as exc:
+            message = str(exc).lower()
+            if not any(word in message for word in ("check", "constraint", "doesn't exist")):
+                raise
+        conn.execute("ALTER TABLE legitimate_products MODIFY format VARCHAR(255) NOT NULL")
+        return
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='legitimate_products'"
+    ).fetchone()
+    table_sql = (row["sql"] or "") if row else ""
+    if "format IN ('physical', 'digital', 'service')" not in table_sql:
+        return
+    _rebuild(conn, "legitimate_products", """
+        CREATE TABLE legitimate_products_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            category TEXT NOT NULL,
+            format TEXT NOT NULL,
+            seller TEXT NOT NULL DEFAULT '',
+            quality TEXT NOT NULL DEFAULT 'Very High',
+            market TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT '',
+            product_code TEXT,
+            expiry TEXT NOT NULL DEFAULT '',
+            intended_country TEXT NOT NULL DEFAULT '',
+            refund_period INTEGER NOT NULL DEFAULT 0 CHECK (refund_period IN (0, 3)),
+            price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+            image_url TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )""", """
+        INSERT INTO legitimate_products_new
+            (id, name, description, category, format, seller, quality, market, state,
+             product_code, expiry, intended_country, refund_period, price_cents, image_url,
+             status, created_at, updated_at, created_by)
+        SELECT id, name, description, category, format, seller, quality, market, state,
+               product_code, expiry, intended_country, refund_period, price_cents, image_url,
+               status, created_at, updated_at, created_by
+        FROM legitimate_products""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS legitimate_products_public "
+        "ON legitimate_products(status, created_at, id)"
+    )
 
 
 def _rebuild(conn, table: str, create_sql: str, copy_sql: str):
@@ -1159,7 +1214,7 @@ def init_mysql():
             "CREATE TABLE IF NOT EXISTS legitimate_products ("
             "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
             "name VARCHAR(160) NOT NULL, description TEXT NOT NULL, "
-            "category VARCHAR(100) NOT NULL, format VARCHAR(20) NOT NULL, "
+            "category VARCHAR(100) NOT NULL, format VARCHAR(255) NOT NULL, "
             "seller VARCHAR(100) NOT NULL DEFAULT '', quality VARCHAR(40) NOT NULL DEFAULT 'Very High', "
             "market VARCHAR(100) NOT NULL DEFAULT '', state VARCHAR(100) NOT NULL DEFAULT '', "
             "product_code VARCHAR(6) NULL, expiry VARCHAR(7) NOT NULL DEFAULT '', "
@@ -4961,8 +5016,6 @@ class Handler(BaseHTTPRequestHandler):
                 problem = "State or province does not match the selected Market."
             if not problem and clean["quality"] != "Very High":
                 problem = "Quality must be Very High."
-            if not problem and clean["format"].lower() not in ("digital", "physical", "service"):
-                problem = "Format must be Digital, Physical, or Service."
             if not problem and not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]):
                 problem = "ID must be six digits and begin with 42, 47, 51, 34, or 37."
             if not problem and clean["product_code"] in seen_codes:
