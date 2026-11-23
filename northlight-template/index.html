@@ -1,4 +1,41 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Northlight | Digital Goods</title><meta name="description" content="Browse the Northlight legitimate digital-goods catalogue."><link rel="stylesheet" href="assets/css/styles.css"></head><body><header class="topbar">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Northlight | Digital Goods</title>
+    <meta
+      name="description"
+      content="Browse legitimate digital goods on Northlight."
+    />
+
+    <!-- This is the one link that connects the page to its stylesheet. -->
+    <link rel="stylesheet" href="assets/css/styles.css" />
+  </head>
+
+  <body>
+    <!-- ========= Dismissible announcements (full-bleed strips) ========== -->
+    <div class="notice-stack" id="noticeStack">
+      <div class="notice notice--dark" data-notice>
+        <span class="notice__text"
+          >Welcome to Northlight — browse our available digital goods.</span
+        >
+        <button class="notice__close" type="button" aria-label="Dismiss notice">
+          ✕
+        </button>
+      </div>
+      <div class="notice notice--green" data-notice>
+        <span class="notice__text"
+          >New products and updates are posted here.</span
+        >
+        <button class="notice__close" type="button" aria-label="Dismiss notice">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- ============================ Top bar ============================ -->
+    <header class="topbar">
       <div class="topbar__inner">
         <!-- ===== LOGO (left) ==================================================
              Replace the dashed placeholder below with your own image:
@@ -11,7 +48,6 @@
         <a class="topbar__logo" href="index.html" aria-label="Home">
 
         <img src="logo.png" alt="Your store" class="topbar__logo-img" />
-        </a>
 
         <!-- ===== CENTRE: balance + wallet ================================== -->
         <div class="topbar__center">
@@ -245,7 +281,9 @@
         </div>
       </div>
     </header>
-<nav class="subnav" aria-label="Sections">
+
+    <!-- ========================== Secondary nav ========================== -->
+    <nav class="subnav" aria-label="Sections">
       <div class="subnav__inner">
         <a class="tab" href="index.html#rules">
           <svg
@@ -433,37 +471,152 @@
           Tickets
         </a>
       </div>
-    </nav><main class="page page--search">
-  <h1 class="search__title">Legitimate Digital Goods</h1>
-  <form class="filters" id="catalogueFilters" novalidate>
-    <div class="filters__grid">
-      <div class="filters__col">
-        <div class="field-sm">
-          <label class="field-sm__label" for="productQuery">Product name</label>
-          <input class="input-sm" id="productQuery" type="search" placeholder="Search product name" autocomplete="off">
+    </nav>
+
+    <!-- ============================= Page ============================= -->
+    <main class="page">
+      <!-- Policy cards -->
+      <section class="section" id="rules">
+        <h2 class="section__title">Rules</h2>
+        <div class="cards">
+          <article class="card">
+            <p class="card__note card__note--warn">
+              Keep your account information up to date and use the platform responsibly.
+            </p>
+          </article>
+
+          <article class="card">
+            <div class="card__head">
+              <svg
+                class="card__icon card__icon--green"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 12a9 9 0 1 0 9-9" />
+                <path d="M3 4v5h5" />
+              </svg>
+              <h3 class="card__label">Refunds</h3>
+            </div>
+            <p class="card__body">
+              Refund eligibility and the applicable refund period are shown on each product listing. Contact support if you need help with an order.
+            </p>
+          </article>
+
+          <article class="card">
+            <div class="card__head">
+              <svg
+                class="card__icon card__icon--violet"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M4 5h16v11H4z" />
+                <path d="M8 20h8M12 16v4" />
+              </svg>
+              <h3 class="card__label">New Digital Goods</h3>
+            </div>
+            <p class="card__body">
+              Browse the catalogue for current digital, physical, and service listings.
+            </p>
+          </article>
+
+          <article class="card">
+            <div class="card__head">
+              <svg
+                class="card__icon card__icon--amber"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"
+                />
+              </svg>
+              <h3 class="card__label">Support</h3>
+            </div>
+            <p class="card__body">
+              For questions about products, payments, or orders, contact our support team.
+            </p>
+          </article>
         </div>
-        <div class="field-sm">
-          <label class="field-sm__label" for="productFormat">Type</label>
-          <select class="select select--block" id="productFormat">
-            <option value="">All types</option>
-            <option value="digital">Digital</option>
-            <option value="physical">Physical</option>
-            <option value="service">Service</option>
+      </section>
+
+      <!-- Legitimate catalogue replaces the old feed; the rest of the homepage stays intact. -->
+      <section class="section">
+        <div class="section__head">
+          <h2 class="section__title">Available Products</h2>
+          <span class="section__meta" id="resultCount">Loading products…</span>
+        </div>
+        <form class="filters" id="catalogueFilters" novalidate>
+          <div class="filters__grid">
+            <div class="filters__col">
+              <div class="field-sm">
+                <label class="field-sm__label" for="productQuery">Product name</label>
+                <input class="input-sm" id="productQuery" type="search" placeholder="Search product name" autocomplete="off">
+              </div>
+              <div class="field-sm">
+                <label class="field-sm__label" for="productFormat">Type</label>
+                <select class="select select--block" id="productFormat">
+                  <option value="">All types</option>
+                  <option value="digital">Digital</option>
+                  <option value="physical">Physical</option>
+                  <option value="service">Service</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </form>
+        <div class="results__scroll">
+          <table class="rtable" aria-label="Available legitimate products">
+            <thead><tr><th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>Format</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th><th>Action</th></tr></thead>
+            <tbody id="productRows"><tr><td colspan="10">Loading products…</td></tr></tbody>
+          </table>
+        </div>
+        <nav class="pager" id="productPager" aria-label="Product pages"></nav>
+        <span id="catalogueStatus" role="status"></span>
+      </section>
+    </main>
+
+    <!-- ============================ Footer ============================ -->
+    <footer class="footer">
+      <div class="footer__inner">
+        <div class="footer__block">
+          <label class="footer__label" for="lang">Language</label>
+          <select class="select" id="lang">
+            <option>English</option>
+            <option>Français</option>
+            <option>Deutsch</option>
+            <option>Español</option>
+            <option>Português</option>
           </select>
         </div>
+        <div class="footer__block footer__block--links">
+          <a href="#">Terms</a>
+          <a href="#">Privacy</a>
+          <a href="#">Licences</a>
+          <a href="#">Contact</a>
+        </div>
       </div>
-    </div>
-  </form>
-  <section class="results">
-    <div class="results__bar"><span id="resultCount">Loading products…</span><span id="catalogueStatus" role="status"></span></div>
-    <div class="results__scroll">
-      <table class="rtable" aria-label="Legitimate products">
-        <thead><tr><th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>Format</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th><th>Action</th></tr></thead>
-        <tbody id="productRows"><tr><td colspan="10">Loading products…</td></tr></tbody>
-      </table>
-    </div>
-    <nav class="pager" id="productPager" aria-label="Product pages"></nav>
-  </section>
-</main><script src="assets/js/menu.js" defer></script><script src="assets/js/session.js" defer></script>
-<script src="assets/js/legitimate-cart.js" defer></script>
-<script src="assets/js/legitimate-search.js" defer></script></body></html>
+      <p class="footer__legal">© Copyright 2024. All rights reserved.</p>
+    </footer>
+
+    <script src="assets/js/menu.js" defer></script>
+    <script src="assets/js/session.js" defer></script>
+    <script src="assets/js/legitimate-cart.js" defer></script>
+    <script src="assets/js/legitimate-search.js" defer></script>
+    
+  </body>
+</html>
