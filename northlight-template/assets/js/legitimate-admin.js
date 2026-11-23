@@ -53,8 +53,14 @@ importButton.addEventListener("click",async()=>{
  try{
   const products=csvRows.map(r=>({name:r.product,market:r.market,state:r.state,format:r.format,seller:r.seller,quality:r.quality,price:r.price,product_code:r.id,expiry:r.expiry,status:"draft",intended_country:r.intended_country,refund_period:r.refund_period,description:r.description}));
   const result=await request("/api/admin/legitimate-products/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({products})});
-  const duplicateCount=(result.duplicates||[]).length,errorCount=(result.errors||[]).length;csvMessage.textContent="Imported "+result.imported+" draft(s). Skipped "+duplicateCount+" duplicate ID(s); "+errorCount+" invalid row(s). Nothing was published.";
+  const duplicateCount=(result.duplicates||[]).length,errorCount=(result.errors||[]).length;csvMessage.textContent="Imported "+result.imported+" draft(s). Skipped "+duplicateCount+" duplicate ID(s); "+errorCount+" invalid row(s).";
   const details=[...(result.duplicates||[]).map(x=>"Row "+x.row+": "+x.name+" — "+x.reason),...(result.errors||[]).map(x=>"Row "+x.row+": "+x.error)];if(details.length)csvPreview.innerHTML+='<h3>Skipped rows</h3><ul>'+details.map(x=>'<li>'+esc(x)+'</li>').join("")+'</ul>';
+  const importedIds=Array.isArray(result.imported_ids)?result.imported_ids:[];
+  if(importedIds.length&&window.confirm("Publish these "+importedIds.length+" newly imported products to the customer-facing catalogue now?")){
+   csvMessage.textContent="Publishing "+importedIds.length+" imported products…";
+   const published=await request("/api/admin/legitimate-products/publish-import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:importedIds})});
+   csvMessage.textContent="Published "+published.published+" products. They are now visible on the customer-facing catalogue.";
+  }else{csvMessage.textContent+=" They remain drafts and are not visible to customers.";}
   csvRows=[];csvFile.value="";importButton.disabled=true;await load();
  }catch(error){csvMessage.textContent=error.message;importButton.disabled=false;}finally{previewButton.disabled=false;}
 });
