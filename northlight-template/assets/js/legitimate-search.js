@@ -28,13 +28,14 @@ function render(){
  const list=filteredProducts(),size=Number(els.size.value)||10,pages=Math.max(1,Math.ceil(list.length/size));
  page=Math.min(page,pages);const start=(page-1)*size,shown=list.slice(start,start+size);
  els.count.textContent=list.length+(list.length===1?" product":" products");
- if(!shown.length){els.rows.innerHTML='<tr><td colspan="8" class="catalogue__empty">'+(products.length?"No products match those filters.":"No products have been published yet.")+'</td></tr>';}
+ if(!shown.length){els.rows.innerHTML='<tr><td colspan="9" class="catalogue__empty">'+(products.length?"No products match those filters.":"No products have been published yet.")+'</td></tr>';}
  else{
-  els.rows.innerHTML=shown.map(p=>'<tr><td class="product-name">'+esc(p.name)+'</td><td>'+esc(p.seller)+'</td><td class="quality">'+esc(p.quality||"Very High")+'</td><td class="product-id">'+esc(p.product_code)+'</td><td>'+esc(p.expiry)+'</td><td>'+esc(p.address||[p.market,p.state].filter(Boolean).join(", "))+'</td><td>'+Number(p.refund_period||0)+' days</td><td class="price">'+money(p.price)+'</td></tr>').join("");
+  els.rows.innerHTML=shown.map(p=>'<tr><td class="product-name">'+esc(p.name)+'</td><td>'+esc(p.seller)+'</td><td class="quality">'+esc(p.quality||"Very High")+'</td><td class="product-id">'+esc(p.product_code)+'</td><td>'+esc(p.expiry)+'</td><td>'+esc(p.address||[p.market,p.state].filter(Boolean).join(", "))+'</td><td>'+Number(p.refund_period||0)+' days</td><td class="price">'+money(p.price)+'</td><td class="product-actions"><button class="btn" type="button" data-legit-add="'+esc(p.id||p.product_code)+'">Add to cart</button><button class="btn btn--primary" type="button" data-legit-buy="'+esc(p.id||p.product_code)+'">Buy now</button></td></tr>').join("");
  }
  els.pager.innerHTML="";
  if(pages>1){for(let n=1;n<=pages;n++){const b=document.createElement("button");b.type="button";b.textContent=String(n);if(n===page)b.setAttribute("aria-current","page");b.addEventListener("click",()=>{page=n;render();});els.pager.appendChild(b);}}
 }
+document.addEventListener("click",e=>{const add=e.target.closest("[data-legit-add]");const buy=e.target.closest("[data-legit-buy]");const btn=add||buy;if(!btn)return;const key=btn.getAttribute("data-legit-add")||btn.getAttribute("data-legit-buy");const product=products.find(p=>String(p.id||p.product_code)===String(key));if(!product||!window.NLLegitCart)return;window.NLLegitCart.add({key:String(product.id||product.product_code),title:product.name,price:product.price});if(buy)window.location.href="legitimate-cart.html";else{const old=btn.textContent;btn.textContent="Added";btn.disabled=true;setTimeout(()=>{btn.textContent=old;btn.disabled=false;},900);}});
 function updateMarkets(){
  const current=els.market.value,markets=[...new Set(products.map(p=>clean(p.market)).filter(Boolean))].sort();
  els.market.innerHTML='<option value="">All countries</option>'+markets.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
