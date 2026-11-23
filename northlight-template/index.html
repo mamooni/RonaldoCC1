@@ -1,41 +1,4 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Credit Card Store</title>
-    <meta
-      name="description"
-      content="Ronaldo CC is a card selling shop"
-    />
-
-    <!-- This is the one link that connects the page to its stylesheet. -->
-    <link rel="stylesheet" href="assets/css/styles.css" />
-  </head>
-
-  <body data-requires-auth>
-    <!-- ========= Dismissible announcements (full-bleed strips) ========== -->
-    <div class="notice-stack" id="noticeStack">
-      <div class="notice notice--dark" data-notice>
-        <span class="notice__text"
-          >NEW DOMAIN IS CLUB-RONALDO.AT , SAVE IT !</span
-        >
-        <button class="notice__close" type="button" aria-label="Dismiss notice">
-          ✕
-        </button>
-      </div>
-      <div class="notice notice--green" data-notice>
-        <span class="notice__text"
-          >Firsthand CC Seller Required , Massive Sales ! Channel FOR NEWS UPDATES.</span
-        >
-        <button class="notice__close" type="button" aria-label="Dismiss notice">
-          ✕
-        </button>
-      </div>
-    </div>
-
-    <!-- ============================ Top bar ============================ -->
-    <header class="topbar">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Northlight | Digital Goods</title><meta name="description" content="Browse the Northlight legitimate digital-goods catalogue."><link rel="stylesheet" href="assets/css/styles.css"></head><body><header class="topbar">
       <div class="topbar__inner">
         <!-- ===== LOGO (left) ==================================================
              Replace the dashed placeholder below with your own image:
@@ -48,6 +11,7 @@
         <a class="topbar__logo" href="index.html" aria-label="Home">
 
         <img src="logo.png" alt="Your store" class="topbar__logo-img" />
+        </a>
 
         <!-- ===== CENTRE: balance + wallet ================================== -->
         <div class="topbar__center">
@@ -85,16 +49,16 @@
 
           <a
             class="icon-btn"
-            href="cart.html"
+            href="legitimate-cart.html"
             aria-label="Shopping cart"
-            id="cartBtn"
+            id="legitCartBtn"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
               <path
                 d="M7 4a3 3 0 0 1 10 0h2.5a1 1 0 0 1 1 .9l1 12A2 2 0 0 1 19.5 19h-15a2 2 0 0 1-2-2.1l1-12a1 1 0 0 1 1-.9H7Zm2 0h6a1 1 0 0 0-2-2h-2a1 1 0 0 0-2 2Z"
               />
             </svg>
-            <span class="badge" id="cartCount" hidden>0</span>
+            <span class="badge" id="legitCartCount" hidden>0</span>
           </a>
 
           <div class="menu" data-menu>
@@ -281,9 +245,7 @@
         </div>
       </div>
     </header>
-
-    <!-- ========================== Secondary nav ========================== -->
-    <nav class="subnav" aria-label="Sections">
+<nav class="subnav" aria-label="Sections">
       <div class="subnav__inner">
         <a class="tab" href="index.html#rules">
           <svg
@@ -325,7 +287,7 @@
               <rect x="2" y="5" width="20" height="14" rx="2" />
               <path d="M2 10h20" />
             </svg>
-            Cards
+            Digital Goods
             <svg
               class="tab__chev"
               viewBox="0 0 24 24"
@@ -337,12 +299,8 @@
           </button>
 
           <div class="menu__panel" id="goodsMenu" hidden>
-            <a class="menu__item" href="search.html">
-              NON VBV 
-            </a>
-            <a class="menu__item" href="expensive.html">
-              Enroll 
-            </a>
+            <a class="menu__item" href="expensive.html">Expensive</a>
+            <a class="menu__item" href="search.html">Product Catalogue</a>
           </div>
       </div>
 
@@ -475,160 +433,20 @@
           Tickets
         </a>
       </div>
-    </nav>
-
-    <!-- ============================= Page ============================= -->
-    <main class="page">
-      <!-- Policy cards -->
-      <section class="section" id="rules">
-        <h2 class="section__title">Rules</h2>
-        <div class="cards">
-          <article class="card">
-            <p class="card__note card__note--warn">
-              If your account has $0 deposit after signup then your account will
-              be auto deleted within 14 days.
-            </p>
-          </article>
-
-          <article class="card">
-            <div class="card__head">
-              <svg
-                class="card__icon card__icon--green"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M3 12a9 9 0 1 0 9-9" />
-                <path d="M3 4v5h5" />
-              </svg>
-              <h3 class="card__label">Refunds</h3>
-            </div>
-            <p class="card__body">
-              You have 120-180 seconds to use check button in card orders page.
-              You can open ticket within 5 minutes to get a refund for
-              non-refundable cards and for refundable cards , u can use check
-              button and you can also dispute checker results using dispute
-              button. Support will manually check your card by doing real
-              transaction and refund you if transaction failed
-            </p>
-          </article>
-
-          <article class="card">
-            <div class="card__head">
-              <svg
-                class="card__icon card__icon--violet"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M4 5h16v11H4z" />
-                <path d="M8 20h8M12 16v4" />
-              </svg>
-              <h3 class="card__label">WE UPLOAD NEW CARD BASES 3-4 times DAILY</h3>
-            </div>
-            <p class="card__body">
-              If you are First hand cvv data supplier, We’re open to give you a
-              seller panel. Massive sales to the whole EU/US/Asia base!
-            </p>
-          </article>
-
-          <article class="card">
-            <div class="card__head">
-              <svg
-                class="card__icon card__icon--amber"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path
-                  d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"
-                />
-              </svg>
-              <h3 class="card__label">Support</h3>
-            </div>
-            <p class="card__body">
-              Questions, licensing, custom work — open a ticket or find us on
-              Discord. Typical first reply is under four hours on weekdays.
-            </p>
-          </article>
-        </div>
-      </section>
-
-      <!-- Drops feed (filled in by app.js) -->
-      <section class="section">
-        <div class="section__head">
-          <h2 class="section__title">Base Updates</h2>
-          <span class="section__meta" id="dropCount"></span>
-        </div>
-
-        <div class="feed" id="feed"><!-- JS renders items here --></div>
-
-        <div class="feed__more">
-          <button class="btn btn--ghost" type="button" id="loadMore">
-            Load more
-          </button>
-        </div>
-      </section>
-    </main>
-
-    <!-- ============================ Footer ============================ -->
-    <footer class="footer">
-      <div class="footer__inner">
-        <div class="footer__block">
-          <label class="footer__label" for="lang">Language</label>
-          <select class="select" id="lang">
-            <option>English</option>
-            <option>Français</option>
-            <option>Deutsch</option>
-            <option>Español</option>
-            <option>Português</option>
-          </select>
-        </div>
-        <div class="footer__block footer__block--links">
-          <a href="#">Terms</a>
-          <a href="#">Privacy</a>
-          <a href="#">Licences</a>
-          <a href="#">Contact</a>
-        </div>
-      </div>
-      <p class="footer__legal">© Copyright 2024. All rights reserved.</p>
-    </footer>
-
-    <!-- ==================== Detail dialog (built on demand) ==================== -->
-    <dialog class="dialog" id="dropDialog" aria-labelledby="dialogTitle">
-      <div class="dialog__chrome">
-        <h2 class="dialog__title" id="dialogTitle"></h2>
-        <button
-          class="dialog__close"
-          type="button"
-          data-close-dialog
-          aria-label="Close"
-        >
-          ✕
-        </button>
-      </div>
-      <div class="dialog__body" id="dialogBody"></div>
-    </dialog>
-
-    <script src="assets/js/menu.js" defer></script>
-    <script src="assets/js/cart.js" defer></script>
-    <script src="assets/data/flags-data.js" defer></script>
-    <script src="assets/data/drops-data.js" defer></script>
-    <script src="assets/js/countries.js" defer></script>
-    <script src="assets/js/app.js?v=20261118-3" defer></script>
-    <script src="assets/js/session.js" defer></script>
-    
-  </body>
-</html>
+    </nav><main class="page page--search"><h1 class="search__title">Legitimate Digital Goods</h1>
+<form class="filters" id="catalogueFilters" novalidate><div class="filters__grid">
+<div class="filters__col">
+<div class="field-sm"><label class="field-sm__label" for="productQuery">Product or Seller</label><input class="input-sm" id="productQuery" type="search" placeholder="Search products" autocomplete="off"></div>
+<div class="field-sm"><label class="field-sm__label" for="productMarket">Market</label><select class="select select--block" id="productMarket"><option value="">All countries</option></select></div>
+<div class="field-sm"><label class="field-sm__label" for="productFormat">Format</label><select class="select select--block" id="productFormat"><option value="">All formats</option><option value="digital">Digital</option><option value="physical">Physical</option><option value="service">Service</option></select></div></div>
+<div class="filters__col">
+<div class="field-sm"><label class="field-sm__label" for="productSort">Sort by</label><select class="select select--block" id="productSort"><option value="oldest" selected>Original order</option><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="name">Name: A to Z</option></select></div>
+<div class="field-sm"><label class="field-sm__label" for="minPrice">Minimum price (USD)</label><input class="input-sm" id="minPrice" type="number" min="0" step="0.01" placeholder="0"></div>
+<div class="field-sm"><label class="field-sm__label" for="maxPrice">Maximum price (USD)</label><input class="input-sm" id="maxPrice" type="number" min="0" step="0.01" placeholder="No limit"></div>
+<div class="field-sm"><label class="field-sm__label" for="productPageSize">Show entries</label><select class="select select--block" id="productPageSize"><option>10</option><option selected>25</option><option>50</option></select></div>
+</div></div><div class="filters__actions"><button class="btn btn--primary filters__submit" type="submit">Search</button><button class="btn" type="reset" id="resetFilters">Clear</button></div></form>
+<section class="results"><div class="results__bar"><span id="resultCount">Loading products…</span><span id="catalogueStatus" role="status"></span></div>
+<div class="results__scroll"><table class="rtable" aria-label="Legitimate products"><thead><tr><th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>Format</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th><th>Action</th></tr></thead><tbody id="productRows"><tr><td colspan="10">Loading products…</td></tr></tbody></table></div>
+<nav class="pager" id="productPager" aria-label="Product pages"></nav></section></main><script src="assets/js/menu.js" defer></script><script src="assets/js/session.js" defer></script>
+<script src="assets/js/legitimate-cart.js" defer></script>
+<script src="assets/js/legitimate-search.js" defer></script></body></html>
