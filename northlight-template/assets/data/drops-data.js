@@ -17,7 +17,7 @@ window.NL_DROPS = [
   "formats": "Figma, Sketch, SVG",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 65,
+  "price": 25,
   "daysAgo": 0,
   "time": "16:48",
   "blurb": "A 180-component interface kit with light and dark themes, 12 page templates and a documented token set."
@@ -29,7 +29,7 @@ window.NL_DROPS = [
   "formats": "SVG, PNG, IconJar",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 220,
+  "price": 25,
   "daysAgo": 0,
   "time": "15:20",
   "blurb": "620 hand-drawn line icons on a 24px grid, with editable strokes and an IconJar library."
@@ -41,7 +41,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 70,
+  "price": 25,
   "daysAgo": 0,
   "time": "14:05",
   "blurb": "A six-weight grotesque with matching italics, tabular figures and 400+ glyphs per style."
@@ -53,7 +53,7 @@ window.NL_DROPS = [
   "formats": "Figma, React",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 80,
+  "price": 25,
   "daysAgo": 0,
   "time": "12:30",
   "blurb": "Forty analytic screens — tables, charts, empty states and filters — wired to a mock data layer."
@@ -65,7 +65,7 @@ window.NL_DROPS = [
   "formats": "TIFF, PNG",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 250,
+  "price": 25,
   "daysAgo": 0,
   "time": "11:02",
   "blurb": "Sixty scanned paper surfaces at 6000px, from cold press to heavily grained kraft."
@@ -77,7 +77,7 @@ window.NL_DROPS = [
   "formats": "WAV, Ableton",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 800,
+  "price": 25,
   "daysAgo": 0,
   "time": "10:15",
   "blurb": "One hundred dusty drum loops and one-shots recorded to tape, tempo-tagged and key-labelled."
@@ -89,7 +89,7 @@ window.NL_DROPS = [
   "formats": "AI, SVG, PDF",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 280,
+  "price": 25,
   "daysAgo": 0,
   "time": "09:41",
   "blurb": "Eighteen vintage-style map plates with editable coastlines, contour lines and graticules."
@@ -101,7 +101,7 @@ window.NL_DROPS = [
   "formats": "Figma, SVG, OTF",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 300,
+  "price": 50,
   "daysAgo": 1,
   "time": "18:22",
   "blurb": "The best-selling kit, icon set and type family together, at roughly a third off buying them apart."
@@ -113,7 +113,7 @@ window.NL_DROPS = [
   "formats": "PDF, AI",
   "license": "Personal + client",
   "refund": "14 days",
-  "price": 400,
+  "price": 50,
   "daysAgo": 1,
   "time": "17:05",
   "blurb": "Twelve Swiss-inspired poster layouts on a 12-column grid, ready to print at A2."
@@ -125,7 +125,7 @@ window.NL_DROPS = [
   "formats": "Blender, OBJ, GLB",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 200,
+  "price": 50,
   "daysAgo": 1,
   "time": "15:48",
   "blurb": "Ninety low-poly plants, pots and studio props with baked materials and clean UVs."
@@ -137,7 +137,7 @@ window.NL_DROPS = [
   "formats": "ASE, Sketch, Figma",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 90,
+  "price": 50,
   "daysAgo": 1,
   "time": "13:12",
   "blurb": "Two hundred and forty muted gradient swatches built for editorial layouts."
@@ -149,7 +149,7 @@ window.NL_DROPS = [
   "formats": "Notion, Obsidian",
   "license": "Personal use",
   "refund": "Not eligible",
-  "price": 60,
+  "price": 50,
   "daysAgo": 1,
   "time": "11:37",
   "blurb": "A linked notes system for essays and research, with a reading queue and source tracker."
@@ -161,7 +161,7 @@ window.NL_DROPS = [
   "formats": "ABR, Procreate",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 150,
+  "price": 50,
   "daysAgo": 1,
   "time": "10:04",
   "blurb": "Forty-eight bitmap halftone and stipple brushes at print resolution."
@@ -173,7 +173,7 @@ window.NL_DROPS = [
   "formats": "SVG, IconJar",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 200,
+  "price": 50,
   "daysAgo": 1,
   "time": "08:55",
   "blurb": "Three hundred finance and fintech icons in outline, filled and duotone weights."
@@ -185,7 +185,7 @@ window.NL_DROPS = [
   "formats": "PSD, Figma",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 180,
+  "price": 80,
   "daysAgo": 2,
   "time": "19:30",
   "blurb": "Six photoreal cassette and walkman mockups with editable labels and screen layers."
@@ -197,7 +197,7 @@ window.NL_DROPS = [
   "formats": "Figma, SVG, OTF, WAV",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 250,
+  "price": 80,
   "daysAgo": 2,
   "time": "16:14",
   "blurb": "The full catalogue, current and future, on one licence with priority support included."
@@ -209,7 +209,7 @@ window.NL_DROPS = [
   "formats": "VS Code, Sublime",
   "license": "Unlimited projects",
   "refund": "Not eligible",
-  "price": 350,
+  "price": 80,
   "daysAgo": 2,
   "time": "14:26",
   "blurb": "Six low-contrast editor themes with matching terminal palettes and diff colours."
@@ -221,7 +221,7 @@ window.NL_DROPS = [
   "formats": "CUBE, 3DL",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 300,
+  "price": 80,
   "daysAgo": 2,
   "time": "12:02",
   "blurb": "Thirty film-emulation LUTs balancing skin tones under tungsten, daylight and mixed light."
@@ -233,7 +233,7 @@ window.NL_DROPS = [
   "formats": "JPG, RAW",
   "license": "Editorial + commercial",
   "refund": "14 days",
-  "price": 100,
+  "price": 80,
   "daysAgo": 2,
   "time": "10:48",
   "blurb": "One hundred and twenty landscape frames from the Norwegian coast, full-resolution RAW included."
@@ -245,7 +245,7 @@ window.NL_DROPS = [
   "formats": "OTF, TTF",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 100,
+  "price": 80,
   "daysAgo": 2,
   "time": "09:15",
   "blurb": "A hand-chalked display face paired with a clean supporting sans, 300 glyphs each."
@@ -257,7 +257,7 @@ window.NL_DROPS = [
   "formats": "AEP, JSX",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 50,
+  "price": 80,
   "daysAgo": 3,
   "time": "20:10",
   "blurb": "Ninety drag-and-drop transitions, text reveals and camera moves with adjustable timing."
@@ -269,7 +269,7 @@ window.NL_DROPS = [
   "formats": "SVG, JSON",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 50,
+  "price": 80,
   "daysAgo": 3,
   "time": "17:44",
   "blurb": "One thousand six hundred icons across twelve categories, with a searchable JSON index."
@@ -281,7 +281,7 @@ window.NL_DROPS = [
   "formats": "InDesign, Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 500,
+  "price": 80,
   "daysAgo": 3,
   "time": "15:02",
   "blurb": "Twenty-four magazine spreads with baseline grids, running heads and folio styles."
@@ -293,7 +293,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 200,
+  "price": 80,
   "daysAgo": 3,
   "time": "13:35",
   "blurb": "Two hours of seamless ambient beds for video, podcasts and installations."
@@ -305,7 +305,7 @@ window.NL_DROPS = [
   "formats": "EXR, PNG",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 370,
+  "price": 80,
   "daysAgo": 3,
   "time": "11:20",
   "blurb": "Sixteen 8K terrain height maps with matching normal and splat masks."
@@ -317,7 +317,7 @@ window.NL_DROPS = [
   "formats": "PNG, TIFF",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 85,
+  "price": 100,
   "daysAgo": 3,
   "time": "10:05",
   "blurb": "Eighty risograph grain overlays that tile seamlessly at any scale."
@@ -329,7 +329,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 250,
+  "price": 100,
   "daysAgo": 3,
   "time": "08:40",
   "blurb": "A component-first wireframe library with auto-layout forms, tables and navigation blocks."
@@ -341,7 +341,7 @@ window.NL_DROPS = [
   "formats": "ABR, Procreate",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 17,
+  "price": 100,
   "daysAgo": 4,
   "time": "18:52",
   "blurb": "Misregistered ink brushes that mimic two-colour riso printing, with paper-noise tips."
@@ -353,7 +353,7 @@ window.NL_DROPS = [
   "formats": "AI, SVG",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 310,
+  "price": 100,
   "daysAgo": 4,
   "time": "16:30",
   "blurb": "Sixty editable wordmark lockups with kerning pairs already dialled in."
@@ -365,7 +365,7 @@ window.NL_DROPS = [
   "formats": "PSD, Figma",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 250,
+  "price": 100,
   "daysAgo": 4,
   "time": "14:18",
   "blurb": "Twelve fabric and paper mockups lit with softboxes, each with a smart-object workflow."
@@ -377,7 +377,7 @@ window.NL_DROPS = [
   "formats": "WAV, Serum",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 250,
+  "price": 100,
   "daysAgo": 4,
   "time": "12:04",
   "blurb": "Eighty warm synth patches and matching one-shots for Serum and any sampler."
@@ -389,7 +389,7 @@ window.NL_DROPS = [
   "formats": "Notion, PDF",
   "license": "Personal use",
   "refund": "Not eligible",
-  "price": 80,
+  "price": 150,
   "daysAgo": 4,
   "time": "10:22",
   "blurb": "A weekly planning system with printable sheets and a matching Notion database."
@@ -401,7 +401,7 @@ window.NL_DROPS = [
   "formats": "SVG, PNG",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 250,
+  "price": 150,
   "daysAgo": 4,
   "time": "09:10",
   "blurb": "Four hundred dimensional icons rendered at 512px, with flat SVG fallbacks."
@@ -413,7 +413,7 @@ window.NL_DROPS = [
   "formats": "Blend, GLB",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 460 ,
+  "price": 150 ,
   "daysAgo": 5,
   "time": "19:44",
   "blurb": "Two hundred procedural materials — wood, concrete, glass, fabric — with one-click setup."
@@ -425,7 +425,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 300,
+  "price": 150,
   "daysAgo": 5,
   "time": "17:12",
   "blurb": "A monospaced display face with sharp corners, full case and a box-drawing set."
@@ -437,7 +437,7 @@ window.NL_DROPS = [
   "formats": "SVG, PDF",
   "license": "Personal + client",
   "refund": "14 days",
-  "price": 50,
+  "price": 150,
   "daysAgo": 5,
   "time": "15:35",
   "blurb": "Layered baseline and column overlays for proofing layouts at any trim size."
@@ -461,7 +461,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 400,
+  "price": 150,
   "daysAgo": 5,
   "time": "11:26",
   "blurb": "Sixteen e-commerce templates covering product, cart, checkout and confirmation screens."
@@ -473,7 +473,7 @@ window.NL_DROPS = [
   "formats": "ABR, Procreate",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 180,
+  "price": 150,
   "daysAgo": 5,
   "time": "10:12",
   "blurb": "Thirty-two pencil, ink and marker brushes that scale smoothly at large canvas sizes."
@@ -485,7 +485,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 200,
+  "price": 150,
   "daysAgo": 5,
   "time": "08:48",
   "blurb": "Four hundred location recordings — rain, crowds, machinery — normalised and labelled."
@@ -497,7 +497,7 @@ window.NL_DROPS = [
   "formats": "SVG, IconJar",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 6,
   "time": "18:30",
   "blurb": "Two hundred and forty icons drawn for print, with a thinner 1.25px stroke variant."
@@ -509,7 +509,7 @@ window.NL_DROPS = [
   "formats": "AI, PDF",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 450,
+  "price": 100,
   "daysAgo": 6,
   "time": "16:06",
   "blurb": "Forty packaging label layouts with editable ornaments and CMYK swatches."
@@ -521,7 +521,7 @@ window.NL_DROPS = [
   "formats": "Blend, OBJ",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 520,
+  "price": 100,
   "daysAgo": 6,
   "time": "14:40",
   "blurb": "Six hundred isometric building blocks, vehicles and street props with consistent scale."
@@ -533,7 +533,7 @@ window.NL_DROPS = [
   "formats": "OTF, TTF",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 500,
+  "price": 100,
   "daysAgo": 6,
   "time": "12:18",
   "blurb": "A high-contrast display serif with a small caps companion for headings and covers."
@@ -545,7 +545,7 @@ window.NL_DROPS = [
   "formats": "CUBE",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 240,
+  "price": 100,
   "daysAgo": 6,
   "time": "10:30",
   "blurb": "Twenty-four LUTs matched to classic film stocks, with warm and cool variants."
@@ -557,7 +557,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 350,
+  "price": 100,
   "daysAgo": 6,
   "time": "08:22",
   "blurb": "A flexible eight-column studio grid with responsive breakpoints and spacing tokens."
@@ -569,7 +569,7 @@ window.NL_DROPS = [
   "formats": "PSD, TIFF",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 4,
   "time": "08:15",
   "blurb": "Forty scanned paper cutouts on transparent layers, ready to stack into depth."
@@ -581,7 +581,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 900,
+  "price": 50,
   "daysAgo": 4,
   "time": "07:20",
   "blurb": "A two-weight monospace with coding ligatures and a hinted 12px master."
@@ -593,7 +593,7 @@ window.NL_DROPS = [
   "formats": "Figma, Sketch",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 900,
+  "price": 50,
   "daysAgo": 5,
   "time": "07:55",
   "blurb": "Ninety mobile screens across onboarding, checkout and account settings."
@@ -605,7 +605,7 @@ window.NL_DROPS = [
   "formats": "XMP, CUBE",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 600,
+  "price": 50,
   "daysAgo": 5,
   "time": "06:40",
   "blurb": "Eighteen film-grain and dust overlays tuned for high-ISO archive scans."
@@ -617,7 +617,7 @@ window.NL_DROPS = [
   "formats": "InDesign",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 600,
+  "price": 50,
   "daysAgo": 6,
   "time": "07:35",
   "blurb": "Exhibition label grids for wall cards, captions and catalogue spreads."
@@ -629,7 +629,7 @@ window.NL_DROPS = [
   "formats": "ABR, PNG",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 600,
+  "price": 50,
   "daysAgo": 6,
   "time": "06:50",
   "blurb": "Sixty pressure-sensitive ink brushes with wet edges and dry-brush variants."
@@ -641,7 +641,7 @@ window.NL_DROPS = [
   "formats": "SVG, PDF",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 23,
+  "price": 50,
   "daysAgo": 7,
   "time": "20:10",
   "blurb": "Two hundred and forty wayfinding icons on a 20px grid, stroke and solid."
@@ -653,7 +653,7 @@ window.NL_DROPS = [
   "formats": "AEP, JSX",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 310,
+  "price": 50,
   "daysAgo": 7,
   "time": "18:40",
   "blurb": "Camera pushes, parallax reveals and eased transitions for short-form video."
@@ -665,7 +665,7 @@ window.NL_DROPS = [
   "formats": "JPG, RAW",
   "license": "Editorial + commercial",
   "refund": "14 days",
-  "price": 500,
+  "price": 50,
   "daysAgo": 7,
   "time": "17:05",
   "blurb": "Ninety aerial frames of coastline and harbour, corrected and catalogued."
@@ -677,7 +677,7 @@ window.NL_DROPS = [
   "formats": "Figma, PDF",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 350,
+  "price": 50,
   "daysAgo": 7,
   "time": "15:30",
   "blurb": "A workbook for laying out brand systems: grids, spacing scales and type ramps."
@@ -689,7 +689,7 @@ window.NL_DROPS = [
   "formats": "PNG",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 190,
+  "price": 25,
   "daysAgo": 7,
   "time": "13:12",
   "blurb": "Thirty-two resin and riso print textures at 6K, tileable where it matters."
@@ -701,7 +701,7 @@ window.NL_DROPS = [
   "formats": "OTF, TTF",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 50,
+  "price": 25,
   "daysAgo": 7,
   "time": "11:40",
   "blurb": "A neutral grotesque in five weights with tabular figures and small caps."
@@ -713,7 +713,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 50,
+  "price": 25,
   "daysAgo": 7,
   "time": "09:05",
   "blurb": "One hundred and twenty one-bar drum loops across four tempos, dry and processed."
@@ -725,7 +725,7 @@ window.NL_DROPS = [
   "formats": "Blender",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 50,
+  "price": 25,
   "daysAgo": 8,
   "time": "19:15",
   "blurb": "Forty industrial props modelled to scale, with PBR materials and clean UVs."
@@ -737,7 +737,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 70,
+  "price": 25,
   "daysAgo": 8,
   "time": "16:44",
   "blurb": "Twelve chart types with light and dark states plus empty and loading variants."
@@ -749,7 +749,7 @@ window.NL_DROPS = [
   "formats": "PDF, InDesign",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 70,
+  "price": 25,
   "daysAgo": 8,
   "time": "14:20",
   "blurb": "Eighteen poster layouts built around specimen type, with crop marks ready."
@@ -761,7 +761,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 200,
+  "price": 25,
   "daysAgo": 8,
   "time": "11:50",
   "blurb": "Room and hall impulse responses for scoring, from a booth to a stone church."
@@ -785,7 +785,7 @@ window.NL_DROPS = [
   "formats": "CUBE",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 9,
   "time": "18:05",
   "blurb": "Twenty LUTs for skin tones under tungsten, softbox and window light."
@@ -797,7 +797,7 @@ window.NL_DROPS = [
   "formats": "React, CSS",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 300,
+  "price": 100,
   "daysAgo": 9,
   "time": "15:38",
   "blurb": "A copy-to-clipboard component set with tokens, stories and a dark theme."
@@ -809,7 +809,7 @@ window.NL_DROPS = [
   "formats": "PSD",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 9,
   "time": "13:02",
   "blurb": "Packaging and print mockups on matte paper, with editable shadows."
@@ -821,7 +821,7 @@ window.NL_DROPS = [
   "formats": "JPG",
   "license": "Editorial + commercial",
   "refund": "14 days",
-  "price": 300,
+  "price": 100,
   "daysAgo": 9,
   "time": "10:26",
   "blurb": "One hundred and ten harbour and dock frames shot at first light."
@@ -833,7 +833,7 @@ window.NL_DROPS = [
   "formats": "SVG, Sketch",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 9,
   "time": "08:12",
   "blurb": "A rounded icon set of 280 glyphs with a matching favicon build."
@@ -845,7 +845,7 @@ window.NL_DROPS = [
   "formats": "OTF",
   "license": "Desktop + web",
   "refund": "14 days",
-  "price": 400,
+  "price": 100,
   "daysAgo": 10,
   "time": "19:22",
   "blurb": "A slab serif in four weights with an extended display cut and alternates."
@@ -857,7 +857,7 @@ window.NL_DROPS = [
   "formats": "Keynote, PPTX",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 350,
+  "price": 100,
   "daysAgo": 10,
   "time": "16:10",
   "blurb": "Forty slide layouts for launch decks, with charts, tables and dividers."
@@ -869,7 +869,7 @@ window.NL_DROPS = [
   "formats": "PSD, JPG",
   "license": "Commercial use",
   "refund": "14 days",
-  "price": 600,
+  "price": 100,
   "daysAgo": 10,
   "time": "13:44",
   "blurb": "Twelve record sleeve mockups with sleeve textures and shrink-wrap variants."
@@ -893,7 +893,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Royalty-free",
   "refund": "Not eligible",
-  "price": 300,
+  "price": 50,
   "daysAgo": 10,
   "time": "08:40",
   "blurb": "Three hundred foley hits — cloth, glass, paper, metal — recorded at 96kHz."
@@ -905,7 +905,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 100,
+  "price": 50,
   "daysAgo": 11,
   "time": "18:34",
   "blurb": "Extras for the Orbital kit: command palette, toast stack and empty states."
@@ -917,7 +917,7 @@ window.NL_DROPS = [
   "formats": "ABR",
   "license": "Commercial use",
   "refund": "7 days",
-  "price": 100,
+  "price": 50,
   "daysAgo": 11,
   "time": "15:12",
   "blurb": "Forty pencil and graphite brushes tuned for sketch thumbnails."
@@ -929,7 +929,7 @@ window.NL_DROPS = [
   "formats": "HTML, CSS, JS",
   "license": "Commercial use",
   "refund": "Not eligible",
-  "price": 250,
+  "price": 50,
   "daysAgo": 11,
   "time": "12:48",
   "blurb": "A dependency-free starter with accessible components and dark mode."
@@ -941,7 +941,7 @@ window.NL_DROPS = [
   "formats": "JPG, RAW",
   "license": "Editorial + commercial",
   "refund": "14 days",
-  "price": 450,
+  "price": 50,
   "daysAgo": 11,
   "time": "10:04",
   "blurb": "Sixty macro frames of tide pools, focus-stacked and colour matched."
@@ -953,7 +953,7 @@ window.NL_DROPS = [
   "formats": "SVG, Figma",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 200,
+  "price": 50,
   "daysAgo": 11,
   "time": "08:26",
   "blurb": "Two hundred layered icons with soft shadow variants and a toggle state."
@@ -965,7 +965,7 @@ window.NL_DROPS = [
   "formats": "PDF",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 100,
+  "price": 50,
   "daysAgo": 11,
   "time": "07:10",
   "blurb": "Twenty archive-inspired poster layouts with gridded type and duotone blocks."
@@ -977,7 +977,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 300,
+  "price": 150,
   "daysAgo": 1,
   "time": "08:00",
   "blurb": "Two friendly grotesques drawn for signage, with five weights each and a variable file."
@@ -1001,7 +1001,7 @@ window.NL_DROPS = [
   "formats": "SVG, Figma",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 250,
+  "price": 150,
   "daysAgo": 3,
   "time": "10:14",
   "blurb": "340 wayfinding and transit icons on a 24px grid, with stroke and filled variants."
@@ -1013,7 +1013,7 @@ window.NL_DROPS = [
   "formats": "TIFF, PNG",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 200,
+  "price": 150,
   "daysAgo": 4,
   "time": "11:21",
   "blurb": "Sixty scanned water and rock textures at 6K, tileable and colour-corrected."
@@ -1025,7 +1025,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 50,
+  "price": 150,
   "daysAgo": 5,
   "time": "12:28",
   "blurb": "An ocean-themed dashboard kit: 96 components, dark mode, charts and map cards."
@@ -1037,7 +1037,7 @@ window.NL_DROPS = [
   "formats": "WAV",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 50,
+  "price": 150,
   "daysAgo": 6,
   "time": "13:35",
   "blurb": "Ninety minutes of surf, rain and harbour ambience recorded on a 32-bit field kit."
@@ -1049,7 +1049,7 @@ window.NL_DROPS = [
   "formats": "OTF, TTF",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 50,
+  "price": 150,
   "daysAgo": 1,
   "time": "14:42",
   "blurb": "A high-contrast display face in six styles, with alternates built for posters."
@@ -1073,7 +1073,7 @@ window.NL_DROPS = [
   "formats": "Figma, IDML",
   "license": "Unlimited projects",
   "refund": "30 days",
-  "price": 300,
+  "price": 150,
   "daysAgo": 3,
   "time": "16:56",
   "blurb": "Editorial grids for magazines and reports: 18 spreads, baseline grid included."
@@ -1085,7 +1085,7 @@ window.NL_DROPS = [
   "formats": "PSD, PDF",
   "license": "Single seat",
   "refund": "14 days",
-  "price": 250,
+  "price": 150,
   "daysAgo": 4,
   "time": "17:03",
   "blurb": "Twelve layered poster comps at A2 with editable duotone and grain layers."
@@ -1109,7 +1109,7 @@ window.NL_DROPS = [
   "formats": "AEP, MOGRT",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 6,
   "time": "08:17",
   "blurb": "Thirty After Effects and Premiere transitions, all drives and durations exposed."
@@ -1121,7 +1121,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 350,
+  "price": 100,
   "daysAgo": 1,
   "time": "09:24",
   "blurb": "A Latin and Devanagari pair with matched x-height and 6 weights, hinted for screen."
@@ -1133,7 +1133,7 @@ window.NL_DROPS = [
   "formats": "RAW, JPEG",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 50,
+  "price": 100,
   "daysAgo": 2,
   "time": "10:31",
   "blurb": "120 licensed photographs of monsoon light, delivered in 45MP RAW with sRGB previews."
@@ -1145,7 +1145,7 @@ window.NL_DROPS = [
   "formats": "SVG, PNG",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 50,
+  "price": 100,
   "daysAgo": 3,
   "time": "11:38",
   "blurb": "Pattern tiles inspired by block printing, seamless at any size and print-ready."
@@ -1157,7 +1157,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 150,
+  "price": 100,
   "daysAgo": 4,
   "time": "12:45",
   "blurb": "A 140-screen analytics kit with tokens, empty states and light and dark themes."
@@ -1169,7 +1169,7 @@ window.NL_DROPS = [
   "formats": "Lottie, GIF",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 150,
+  "price": 100,
   "daysAgo": 5,
   "time": "13:52",
   "blurb": "Ninety animated micro-icons exported to Lottie, GIF and MP4 at three sizes."
@@ -1181,7 +1181,7 @@ window.NL_DROPS = [
   "formats": "Figma, Sketch",
   "license": "Single team licence",
   "refund": "7 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 6,
   "time": "14:59",
   "blurb": "Two hundred mobile wireframe blocks, ready for prototyping on a 375pt grid."
@@ -1193,7 +1193,7 @@ window.NL_DROPS = [
   "formats": "ASE, CLR",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 150,
+  "price": 100,
   "daysAgo": 1,
   "time": "15:06",
   "blurb": "Forty earth-tone palettes pulled from landscape photographs, as swatch files."
@@ -1205,7 +1205,7 @@ window.NL_DROPS = [
   "formats": "InDesign",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 200,
+  "price": 100,
   "daysAgo": 2,
   "time": "16:13",
   "blurb": "A 40-page annual report template with tables, charts and a cover system."
@@ -1217,7 +1217,7 @@ window.NL_DROPS = [
   "formats": "PNG, TIFF",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 250,
+  "price": 100,
   "daysAgo": 3,
   "time": "17:20",
   "blurb": "Seventy dry grass, rock and dust overlays at 4K, seamless where needed."
@@ -1229,7 +1229,7 @@ window.NL_DROPS = [
   "formats": "VS Code, Sublime",
   "license": "Unlimited projects",
   "refund": "7 days",
-  "price": 150,
+  "price": 50,
   "daysAgo": 4,
   "time": "18:27",
   "blurb": "Eight editor themes, light and dark, with matched terminal colours and icons."
@@ -1241,7 +1241,7 @@ window.NL_DROPS = [
   "formats": "Figma, HTML",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 380,
+  "price": 80,
   "daysAgo": 5,
   "time": "08:34",
   "blurb": "A portfolio template in Figma and static HTML, with case-study and CV layouts."
@@ -1253,7 +1253,7 @@ window.NL_DROPS = [
   "formats": "PDF, SVG",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 200,
+  "price": 80,
   "daysAgo": 6,
   "time": "09:41",
   "blurb": "Six typographic posters built from code snippets, A3 and A2, print-ready."
@@ -1265,7 +1265,7 @@ window.NL_DROPS = [
   "formats": "CUBE",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 200,
+  "price": 80,
   "daysAgo": 1,
   "time": "10:48",
   "blurb": "Thirty colour LUTs for aerial and landscape footage, Rec.709 and LOG variants."
@@ -1277,7 +1277,7 @@ window.NL_DROPS = [
   "formats": "Figma, AI",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 50,
+  "price": 80,
   "daysAgo": 2,
   "time": "11:55",
   "blurb": "Identity templates for premium brands: cards, menus, signage and packaging grids."
@@ -1289,7 +1289,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Unlimited projects",
   "refund": "30 days",
-  "price": 65,
+  "price": 80,
   "daysAgo": 3,
   "time": "12:02",
   "blurb": "Ninety RTL-first components with Arabic and Latin type scales and mirroring rules."
@@ -1301,7 +1301,7 @@ window.NL_DROPS = [
   "formats": "RAW, JPEG",
   "license": "Single seat",
   "refund": "14 days",
-  "price": 100,
+  "price": 80,
   "daysAgo": 4,
   "time": "13:09",
   "blurb": "Eighty long-exposure skylines at dusk, 60MP RAW, fully licensed."
@@ -1313,7 +1313,7 @@ window.NL_DROPS = [
   "formats": "Figma",
   "license": "Single team licence",
   "refund": "30 days",
-  "price": 100,
+  "price": 80,
   "daysAgo": 5,
   "time": "14:16",
   "blurb": "Thirty chart and table components with number formats, dark mode and states."
@@ -1325,7 +1325,7 @@ window.NL_DROPS = [
   "formats": "PowerPoint, Keynote",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 100,
+  "price": 80,
   "daysAgo": 6,
   "time": "15:23",
   "blurb": "A deck system with 60 slides, master grids and chart placeholders."
@@ -1337,7 +1337,7 @@ window.NL_DROPS = [
   "formats": "OTF, WOFF2",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 50,
+  "price": 80,
   "daysAgo": 1,
   "time": "16:30",
   "blurb": "A serif and sans pair in seven weights, with Spanish accents and small caps."
@@ -1349,7 +1349,7 @@ window.NL_DROPS = [
   "formats": "RAW, JPEG",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 300,
+  "price": 80,
   "daysAgo": 2,
   "time": "17:37",
   "blurb": "Ninety photographs of Madrid streets and interiors, 45MP RAW."
@@ -1361,7 +1361,7 @@ window.NL_DROPS = [
   "formats": "ABR, PNG",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 200,
+  "price": 80,
   "daysAgo": 3,
   "time": "18:44",
   "blurb": "Forty ink and wash brushes plus stamp sets, pressure-tested in Photoshop."
@@ -1373,7 +1373,7 @@ window.NL_DROPS = [
   "formats": "ASE, FIG",
   "license": "Single seat",
   "refund": "7 days",
-  "price": 150,
+  "price": 80,
   "daysAgo": 4,
   "time": "08:51",
   "blurb": "Sixty gradient presets in swatch and Figma styles, warm through cool."
@@ -1385,7 +1385,7 @@ window.NL_DROPS = [
   "formats": "InDesign, AI",
   "license": "Single team licence",
   "refund": "14 days",
-  "price": 150,
+  "price": 80,
   "daysAgo": 5,
   "time": "09:58",
   "blurb": "Menu layouts for six venues with price-alignment and print marks."
@@ -1397,7 +1397,7 @@ window.NL_DROPS = [
   "formats": "SVG, Figma",
   "license": "Unlimited projects",
   "refund": "14 days",
-  "price": 200,
+  "price": 80,
   "daysAgo": 6,
   "time": "10:05",
   "blurb": "220 coastal and travel icons on a 24px grid, stroke and outline versions."

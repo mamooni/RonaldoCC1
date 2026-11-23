@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Admin — Northlight</title>
+    <title>Admin </title>
     <meta
       name="description"
       content="Admin console: users and payment review."
@@ -143,10 +143,10 @@
 
         <div class="menu__panel" id="goodsMenu" hidden>
           <a class="menu__item" href="search.html">
-            NON VBV BINS
+            NON VBV 
           </a>
           <a class="menu__item" href="expensive.html">
-            Enroll BINS
+            Enroll 
           </a>
         </div>
       </div>
@@ -174,7 +174,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Tools <svg class="tab__chev" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 10 5 5 5-5z"/></svg>
           </button>
           <div class="menu__panel" id="toolsMenu" hidden>
-            <a class="menu__item" href="tools.html">Product ID Checker</a>
+            <a class="menu__item" href="tools.html">BIN checker</a>
           </div>
         </div>
 
@@ -282,18 +282,18 @@
       </section>
       
       <section class="admin__block">
-        <h2 class="admin__section">Cheap product orders</h2>
+        <h2 class="admin__section">NON VBV orders</h2>
         <div class="admin__scroll">
           <table class="atable">
-            <thead><tr><th>Order</th><th>Customer</th><th>Products</th><th>Total</th><th>Status</th><th>Placed</th></tr></thead>
+            <thead><tr><th>Order</th><th>Customer</th><th>BINS</th><th>Total</th><th>Status</th><th>Placed</th></tr></thead>
             <tbody id="cheapOrdersBody"></tbody>
           </table>
         </div>
-        <p class="admin__empty" id="cheapOrdersEmpty" hidden>No cheap product orders yet.</p>
+        <p class="admin__empty" id="cheapOrdersEmpty" hidden>No NON VBV Card orders yet.</p>
       </section>
 
       <section class="admin__block">
-        <h2 class="admin__section">Premium product orders</h2>
+        <h2 class="admin__section">Enroll orders</h2>
         <div class="admin__scroll">
           <table class="atable">
             <thead>
@@ -434,8 +434,8 @@
             <div class="admin__product-form">
               <h3>Product 1</h3>
 
-              <label>Public Product ID
-                <input name="product_id" maxlength="64" placeholder="NL-WEB-001" required />
+              <label>BIN
+                <input name="product_id" maxlength="64" placeholder="" required />
               </label>
 
               <label>Expiry (MM/YYYY)
@@ -496,7 +496,7 @@
 
           <form id="editExpensiveProductForm">
             <div class="admin__product-form">
-              <label>Public Product ID
+              <label>Base
                 <input name="product_id" maxlength="64" placeholder="NL-WEB-001" required />
               </label>
 
@@ -512,21 +512,21 @@
                 <input name="creator" maxlength="100" required />
               </label>
 
-              <label>Intended country
+              <label>Country
                 <select name="country_code" required>
                   <option value="">Select a country</option>
                 </select>
               </label>
 
-              <label>Category
+              <label>Type
                 <input name="category" maxlength="100" required />
               </label>
 
-              <label>Formats
+              <label>Credit/Debit
                 <input name="formats" maxlength="255" required />
               </label>
 
-              <label>Licence
+              <label>Quality
                 <input name="license" maxlength="190" required />
               </label>
 
@@ -562,11 +562,11 @@
             <thead>
               <tr>
                 <th>DB ID</th>
-                <th>Product ID</th>
+                <th>BIN</th>
                 <th>Expiry</th>
                 <th>Title</th>
                 <th>Creator</th>
-                <th>Category</th>
+                <th>Type</th>
                 <th>Price</th>
                 <th>Added</th>
                 <th>Actions</th>
@@ -576,7 +576,7 @@
           </table>
         </div>
         <p class="admin__empty" id="expensiveProductsEmpty" hidden>
-          No expensive products have been added yet.
+          No Enroll card have been added yet.
         </p>
         <button type="button" class="admin__refresh" id="loadMoreExpensiveProducts" hidden>Load more</button>
       </section>

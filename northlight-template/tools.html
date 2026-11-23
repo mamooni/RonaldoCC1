@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Product ID Checker — Northlight</title>
+    <title>BIN Checker</title>
     <meta
       name="description"
       content="Check whether a Northlight product ID is currently available to purchase."
@@ -135,8 +135,8 @@
           </svg>
         </button>
         <div class="menu__panel" id="goodsMenu" hidden>
-          <a class="menu__item" href="search.html">Cheap Products</a>
-          <a class="menu__item" href="expensive.html">Expensive Products</a>
+          <a class="menu__item" href="search.html">NON VBV</a>
+          <a class="menu__item" href="expensive.html">Enroll</a>
         </div>
       </div>
 
@@ -192,20 +192,20 @@
       </div>
     </nav>
 
-    <!-- ============================== Pag    <!-- ============================== Page ============================== -->
+    <!-- ============================== Pag    <-- ============================== Page ============================== -->
     <main class="page">
       <a class="backlink" href="index.html">← Back to catalog</a>
-      <div class="page-head"><div><h1>Product ID Checker</h1><p>Verify whether a product is currently listed and available to purchase on Northlight.</p></div></div>
+      <div class="page-head"><div><h1>BIN Checker</h1><p>Verify whether a product is currently listed and available to purchase on Ronaldo CC.</p></div></div>
       <section class="panel product-check-panel" aria-labelledby="checkerTitle">
-        <h2 class="section__title" id="checkerTitle">Check a product ID</h2>
-        <p class="product-check-intro">Enter the product ID shown on the listing. We'll check the live catalogue, including standard and premium products.</p>
+        <h2 class="section__title" id="checkerTitle">Check a BIN</h2>
+        <p class="product-check-intro">Enter the BIN shown on the listing. We'll check the live catalogue, including standard and premium Cards.</p>
         <form class="product-check-form" id="productCheckForm">
-          <label class="sr-only" for="productIdInput">Product ID</label>
+          <label class="sr-only" for="productIdInput">BIN</label>
           <input id="productIdInput" name="product_id" type="text" maxlength="64" autocomplete="off" autocapitalize="characters" placeholder="e.g. WDEV-001" required />
-          <button class="btn btn--primary" id="productCheckButton" type="submit">Verify Product</button>
+          <button class="btn btn--primary" id="productCheckButton" type="submit">Verify BIN</button>
         </form>
         <div id="productCheckResult" class="product-check-result" role="status" aria-live="polite" hidden></div>
-        <p class="product-check-footnote">This checker confirms whether the ID is currently listed. Final availability is always rechecked by checkout.</p>
+        <p class="product-check-footnote">This checker confirms whether the BIN is currently listed. Final availability is always rechecked by checkout.</p>
       </section>
     </main>
 
