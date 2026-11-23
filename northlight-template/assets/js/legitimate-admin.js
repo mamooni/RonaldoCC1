@@ -14,6 +14,23 @@ form.addEventListener("submit",async event=>{event.preventDefault();message.text
 byId("resetForm").addEventListener("click",()=>{clearForm();message.textContent="";});
 list.addEventListener("click",async event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit){editProduct(edit.dataset.edit);return;}if(del&&window.confirm("Delete this product permanently?")){try{await request(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",id:del.dataset.delete})});message.textContent="Product deleted.";await load();}catch(error){message.textContent=error.message;}}});
 
+const publishAllButton=byId("publishAllDrafts");
+if(publishAllButton){
+ publishAllButton.addEventListener("click",async()=>{
+  const draftCount=products.filter(p=>p.status==="draft").length;
+  if(!draftCount){message.textContent="There are no draft products to publish.";return;}
+  const prompt="Publish all "+draftCount+" draft products to the customer-facing legitimate catalogue? This cannot be undone here.";
+  if(!window.confirm(prompt))return;
+  publishAllButton.disabled=true;message.textContent="Validating and publishing drafts…";
+  try{
+   const result=await request("/api/admin/legitimate-products/publish-all-drafts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
+   message.textContent=result.published+" products published.";
+   await load();
+  }catch(error){message.textContent=error.message;await load();}
+  finally{publishAllButton.disabled=false;}
+ });
+}
+
 const csvFile=byId("csvFile"),csvPreview=byId("csvPreview"),csvMessage=byId("csvMessage"),previewButton=byId("previewCsv"),importButton=byId("importCsv");
 let csvRows=[];
 function parseCsv(text){
