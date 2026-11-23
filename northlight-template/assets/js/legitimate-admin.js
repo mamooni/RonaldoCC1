@@ -41,8 +41,9 @@ previewButton.addEventListener("click",async()=>{
   if(headers.length!==expected.length||expected.some((h,i)=>headers[i]!==h))throw new Error("CSV headers must be exactly: "+expected.join(", "));
   if(!parsed.length)throw new Error("The CSV has no product rows.");
   if(parsed.length>200)throw new Error("Maximum 200 product rows per import.");
+  const malformed=parsed.findIndex(values=>values.length!==expected.length);
+  if(malformed!==-1)throw new Error("CSV row "+(malformed+2)+" does not contain exactly "+expected.length+" columns.");
   csvRows=parsed.map((values,index)=>{const row={};expected.forEach((key,i)=>row[key]=String(values[i]??"").trim());return {...row,_row:index+2};});
-  const malformed=csvRows.filter(r=>Object.values(r).filter(v=>typeof v==="string").length!==9);
   if(malformed.length)throw new Error("CSV rows have inconsistent columns. Check row "+malformed[0]._row+".");
   const missing=csvRows.filter(r=>!r.name||!r.description||!r.category||!r.price||!["physical","digital","service"].includes(r.format.toLowerCase()));
   const preview=csvRows.slice(0,8);
