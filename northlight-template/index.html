@@ -558,36 +558,13 @@
       <!-- Legitimate catalogue replaces the old feed; the rest of the homepage stays intact. -->
       <section class="section">
         <div class="section__head">
-          <h2 class="section__title">Available Products</h2>
-          <span class="section__meta" id="resultCount">Loading products…</span>
+          <h2 class="section__title">Base Updates</h2>
+          <span class="section__meta" id="dropCount"></span>
         </div>
-        <form class="filters" id="catalogueFilters" novalidate>
-          <div class="filters__grid">
-            <div class="filters__col">
-              <div class="field-sm">
-                <label class="field-sm__label" for="productQuery">Product name</label>
-                <input class="input-sm" id="productQuery" type="search" placeholder="Search product name" autocomplete="off">
-              </div>
-              <div class="field-sm">
-                <label class="field-sm__label" for="productFormat">Type</label>
-                <select class="select select--block" id="productFormat">
-                  <option value="">All types</option>
-                  <option value="digital">Digital</option>
-                  <option value="physical">Physical</option>
-                  <option value="service">Service</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </form>
-        <div class="results__scroll">
-          <table class="rtable" aria-label="Available legitimate products">
-            <thead><tr><th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>Format</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th><th>Action</th></tr></thead>
-            <tbody id="productRows"><tr><td colspan="10">Loading products…</td></tr></tbody>
-          </table>
+        <div class="feed" id="feed"><!-- Legitimate goods are rendered here --></div>
+        <div class="feed__more">
+          <button class="btn btn--ghost" type="button" id="loadMore">Load more</button>
         </div>
-        <nav class="pager" id="productPager" aria-label="Product pages"></nav>
-        <span id="catalogueStatus" role="status"></span>
       </section>
     </main>
 
@@ -617,7 +594,8 @@
     <script src="assets/js/menu.js" defer></script>
     <script src="assets/js/session.js" defer></script>
     <script src="assets/js/legitimate-cart.js" defer></script>
-    <script src="assets/js/legitimate-search.js" defer></script>
+    <script src="assets/js/app.js?v=20261123-1" defer></script>
+    
     
   </body>
 </html>
