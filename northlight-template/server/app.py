@@ -245,7 +245,7 @@ SIGNUP_PATH = "/signup.html"
 
 # Files that must never be served as static content
 # Pages that require the admin role, not merely a session.
-ADMIN_PAGES = {"admin.html"}
+ADMIN_PAGES = {"admin.html", "legitimate-admin.html"}
 
 BLOCKED_PREFIXES = ("server/", "server\\", ".git/", ".arena/")
 BLOCKED_SUFFIXES = (
@@ -347,6 +347,30 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 
 -- postcode lookups are cached so a repeated check costs no API credit
+CREATE TABLE IF NOT EXISTS legitimate_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    format TEXT NOT NULL CHECK (format IN ('physical', 'digital', 'service')),
+    seller TEXT NOT NULL DEFAULT '',
+    quality TEXT NOT NULL DEFAULT 'Very High',
+    market TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    product_code TEXT,
+    expiry TEXT NOT NULL DEFAULT '',
+    intended_country TEXT NOT NULL DEFAULT '',
+    refund_period INTEGER NOT NULL DEFAULT 0 CHECK (refund_period IN (0, 3)),
+    price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+    image_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS legitimate_products_public
+    ON legitimate_products(status, created_at, id);
+
 CREATE TABLE IF NOT EXISTS postcodes (
     country    TEXT NOT NULL,
     code       TEXT NOT NULL,
@@ -871,6 +895,49 @@ def _has_table(conn, name: str) -> bool:
     )
 
 
+def _ensure_legitimate_catalogue_columns(conn):
+    """Add fields to the isolated legitimate catalogue without touching legacy inventory."""
+    columns = _table_columns(conn, "legitimate_products")
+    if DB_KIND == "mysql":
+        additions = {
+            "quality": "VARCHAR(40) NOT NULL DEFAULT 'Very High'",
+            "market": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "state": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "product_code": "VARCHAR(6) NULL",
+            "expiry": "VARCHAR(7) NOT NULL DEFAULT ''",
+            "intended_country": "CHAR(2) NOT NULL DEFAULT ''",
+            "refund_period": "TINYINT NOT NULL DEFAULT 0",
+        }
+    else:
+        additions = {
+            "quality": "TEXT NOT NULL DEFAULT 'Very High'",
+            "market": "TEXT NOT NULL DEFAULT ''",
+            "state": "TEXT NOT NULL DEFAULT ''",
+            "product_code": "TEXT",
+            "expiry": "TEXT NOT NULL DEFAULT ''",
+            "intended_country": "TEXT NOT NULL DEFAULT ''",
+            "refund_period": "INTEGER NOT NULL DEFAULT 0",
+        }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute("ALTER TABLE legitimate_products ADD COLUMN " + name + " " + definition)
+    if DB_KIND == "mysql":
+        index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("legitimate_products", "legitimate_products_code"),
+        ).fetchone()
+        if index is None:
+            conn.execute(
+                "CREATE UNIQUE INDEX legitimate_products_code ON legitimate_products(product_code)"
+            )
+    else:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS legitimate_products_code "
+            "ON legitimate_products(product_code)"
+        )
+
+
 def _migrate(conn):
     """Bring an existing database up to date without losing anything.
 
@@ -941,6 +1008,7 @@ def _migrate(conn):
             print("  migrated payments.amount -> amount_cents (money is now in cents)")
 
     conn.executescript(PAYMENTS_TABLE)
+    _ensure_legitimate_catalogue_columns(conn)
     conn.executescript(PURCHASES_TABLE)
     conn.executescript(CHEAP_PRODUCT_ORDERS_TABLE)
     conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
@@ -1052,6 +1120,7 @@ MYSQL_TABLES = (
     "audit",
     "postcodes",
     "password_resets",
+    "legitimate_products",
 )
 
 
@@ -1086,6 +1155,26 @@ def init_mysql():
             "CONSTRAINT cheap_order_items_quantity_positive CHECK (quantity > 0)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_products ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "name VARCHAR(160) NOT NULL, description TEXT NOT NULL, "
+            "category VARCHAR(100) NOT NULL, format VARCHAR(20) NOT NULL, "
+            "seller VARCHAR(100) NOT NULL DEFAULT '', quality VARCHAR(40) NOT NULL DEFAULT 'Very High', "
+            "market VARCHAR(100) NOT NULL DEFAULT '', state VARCHAR(100) NOT NULL DEFAULT '', "
+            "product_code VARCHAR(6) NULL, expiry VARCHAR(7) NOT NULL DEFAULT '', "
+            "intended_country CHAR(2) NOT NULL DEFAULT '', refund_period TINYINT NOT NULL DEFAULT 0, "
+            "price_cents BIGINT NOT NULL, image_url VARCHAR(1000) NOT NULL DEFAULT '', "
+            "status VARCHAR(20) NOT NULL DEFAULT 'draft', "
+            "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, created_by INT UNSIGNED NULL, "
+            "UNIQUE KEY legitimate_products_code (product_code), "
+            "KEY legitimate_products_public (status, created_at, id), "
+            "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
+            "CONSTRAINT legitimate_products_format CHECK (format IN ('physical', 'digital', 'service')), "
+            "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        _ensure_legitimate_catalogue_columns(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
             "product_id VARCHAR(64) NOT NULL PRIMARY KEY, "
@@ -1849,6 +1938,8 @@ POST_ROUTES = {
     "/api/admin/expensive-products/drafts/publish": "api_admin_publish_expensive_drafts",
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
+    "/api/admin/legitimate-products": "api_admin_legitimate_products",
+    "/api/admin/legitimate-products/import": "api_admin_import_legitimate_products",
 }
 
 GET_ROUTES = (
@@ -2133,6 +2224,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_admin_expensive_product_drafts()
         if path == "/api/bundles":
             return self.api_bundles()
+        if path == "/api/legitimate-products":
+            return self.api_legitimate_products()
+        if path == "/api/admin/legitimate-products":
+            return self.api_admin_legitimate_products_get()
         if path == "/api/expensive-products":
             return self.api_expensive_products()
         if path == "/api/product-check":
@@ -4775,6 +4870,244 @@ class Handler(BaseHTTPRequestHandler):
         if user is None:
             return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
         return self._json(200, {"user": user})
+
+
+    # -------- isolated legitimate-products catalogue (no checkout/wallet) --------
+
+    @staticmethod
+    def _legitimate_product_payload(row):
+        return {
+            "id": row["id"], "name": row["name"], "description": row["description"],
+            "format": row["format"], "seller": row["seller"], "quality": row["quality"],
+            "product_code": row["product_code"], "expiry": row["expiry"],
+            "market": row["market"], "state": row["state"],
+            "address": ", ".join(part for part in (row["market"], row["state"]) if part),
+            "intended_country": row["intended_country"], "refund_period": int(row["refund_period"]),
+            "price": round(int(row["price_cents"]) / 100, 2), "image_url": row["image_url"],
+            "status": row["status"],
+            "created_at": datetime.fromtimestamp(int(row["created_at"]), timezone.utc).isoformat(),
+            "updated_at": int(row["updated_at"]),
+        }
+
+    def api_legitimate_products(self):
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products WHERE status = 'published' AND product_code IS NOT NULL "
+                "AND market <> '' AND state <> '' ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    def api_admin_legitimate_products_get(self):
+        if self._require_admin() is None:
+            return self._json(403, {"error": "Admins only."})
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    @staticmethod
+    def _legitimate_country_codes():
+        return {
+            "united states": "US", "united kingdom": "GB", "canada": "CA",
+            "australia": "AU", "germany": "DE", "france": "FR", "india": "IN",
+        }
+
+    @staticmethod
+    def _legitimate_market_states():
+        return {
+            "united states": {"California", "New York", "Texas", "Florida", "Washington", "Illinois", "Georgia", "Arizona", "Colorado", "Massachusetts", "Nevada", "Oregon"},
+            "united kingdom": {"England", "Scotland", "Wales", "Northern Ireland"},
+            "canada": {"Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba", "Nova Scotia"},
+            "australia": {"New South Wales", "Victoria", "Queensland", "Western Australia", "South Australia", "Tasmania"},
+            "germany": {"Bavaria", "Berlin", "Hamburg", "Hesse", "North Rhine-Westphalia", "Saxony"},
+            "france": {"Île-de-France", "Auvergne-Rhône-Alpes", "Occitanie", "Nouvelle-Aquitaine", "Provence-Alpes-Côte d’Azur"},
+            "india": {"Maharashtra", "Karnataka", "Delhi", "Tamil Nadu", "Telangana", "Gujarat"},
+        }
+
+    def api_admin_import_legitimate_products(self, payload):
+        """Import the separate legitimate catalogue as drafts only."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        items = payload.get("products") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or not items:
+            return self._error(400, "Upload a CSV containing at least one product.")
+        if len(items) > 200:
+            return self._error(400, "A single import is limited to 200 products.")
+
+        country_codes = self._legitimate_country_codes()
+        clean_items, errors, seen_codes = [], [], set()
+        for index, item in enumerate(items, start=2):
+            if not isinstance(item, dict):
+                errors.append({"row": index, "error": "Invalid row."})
+                continue
+            clean = {key: str(item.get(key, "")).strip() for key in (
+                "name", "market", "state", "format", "seller", "quality", "product_code",
+                "expiry", "status", "intended_country", "description"
+            )}
+            problem = None
+            if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+                problem = "Required fields are missing."
+            market_key = clean["market"].lower()
+            market_code = country_codes.get(market_key)
+            if not problem and (not market_code or clean["intended_country"].upper() != market_code):
+                problem = "Intended country must match the selected Market."
+            if not problem and clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+                problem = "State or province does not match the selected Market."
+            if not problem and clean["quality"] != "Very High":
+                problem = "Quality must be Very High."
+            if not problem and clean["format"].lower() not in ("digital", "physical", "service"):
+                problem = "Format must be Digital, Physical, or Service."
+            if not problem and not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]):
+                problem = "ID must be six digits and begin with 42, 47, 51, 34, or 37."
+            if not problem and clean["product_code"] in seen_codes:
+                problem = "Duplicate ID in this CSV."
+            if not problem and not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]):
+                problem = "Expiry must use MM/YYYY."
+            try:
+                refund = int(item.get("refund_period"))
+                if refund not in (0, 3):
+                    raise ValueError
+            except (TypeError, ValueError):
+                refund = 0
+                problem = problem or "Refund period must be 0 or 3."
+            try:
+                price = Decimal(str(item.get("price", "")).strip())
+                if not price.is_finite() or price < 0 or price > Decimal("99999999"):
+                    raise InvalidOperation
+                price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            except (InvalidOperation, ValueError, TypeError):
+                price_cents = 0
+                problem = problem or "Enter a valid non-negative price."
+            if problem:
+                errors.append({"row": index, "error": problem})
+                continue
+            seen_codes.add(clean["product_code"])
+            clean_items.append((clean, refund, price_cents, index))
+
+        if not clean_items:
+            return self._json(400, {"error": "No valid rows to import.", "errors": errors})
+
+        now = int(time.time())
+        imported, duplicates = 0, []
+        with db(write=True) as conn:
+            for clean, refund, price_cents, row_number in clean_items:
+                exists = conn.execute(
+                    "SELECT id FROM legitimate_products WHERE product_code = ?", (clean["product_code"],)
+                ).fetchone()
+                if exists:
+                    duplicates.append({"row": row_number, "name": clean["name"], "reason": "Duplicate product ID."})
+                    continue
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products "
+                    "(name, description, category, format, seller, quality, market, state, product_code, expiry, "
+                    "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'draft', ?, ?, ?)",
+                    (clean["name"], clean["description"], clean["format"].lower(), clean["seller"], clean["quality"],
+                     clean["market"], clean["state"], clean["product_code"], clean["expiry"],
+                     clean["intended_country"].upper(), refund, price_cents, now, now, admin["id"]),
+                )
+                imported += 1
+                audit(conn, "legitimate_product.import", actor=admin, target=str(cursor.lastrowid),
+                      detail="CSV import; forced draft; row=" + str(row_number), ip=self.client_address[0])
+        return self._json(200, {
+            "ok": True, "imported": imported, "duplicates": duplicates,
+            "errors": errors, "message": "Imported products are saved as drafts. Nothing was published."
+        })
+
+    def api_admin_legitimate_products(self, payload):
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if not isinstance(payload, dict):
+            return self._error(400, "Invalid product request.")
+        if str(payload.get("action", "save")).strip().lower() == "delete":
+            try:
+                product_id = int(payload.get("id"))
+                if product_id < 1: raise ValueError
+            except (TypeError, ValueError):
+                return self._error(400, "A valid product ID is required.")
+            with db(write=True) as conn:
+                cursor = conn.execute("DELETE FROM legitimate_products WHERE id = ?", (product_id,))
+                if cursor.rowcount == 0: return self._error(404, "Product not found.")
+                audit(conn, "legitimate_product.delete", actor=admin, target=str(product_id),
+                      detail="standalone catalogue", ip=self.client_address[0])
+            return self._json(200, {"ok": True})
+
+        item = payload.get("product")
+        if not isinstance(item, dict): return self._error(400, "Product details are required.")
+        clean = {key: str(item.get(key, "")).strip() for key in (
+            "name", "market", "state", "format", "seller", "quality", "product_code",
+            "expiry", "intended_country", "description"
+        )}
+        if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+            return self._error(400, "All product fields are required.")
+        market_key = clean["market"].lower()
+        if market_key not in self._legitimate_country_codes() or clean["intended_country"].upper() != self._legitimate_country_codes()[market_key]:
+            return self._error(400, "Intended country must match Market.")
+        if clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+            return self._error(400, "State or province does not match Market.")
+        if clean["quality"] != "Very High": return self._error(400, "Quality must be Very High.")
+        if not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
+        if not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]): return self._error(400, "Expiry must use MM/YYYY.")
+        try:
+            refund = int(item.get("refund_period"))
+            if refund not in (0, 3): raise ValueError
+            price = Decimal(str(item.get("price", "")).strip())
+            if not price.is_finite() or price < 0 or price > Decimal("99999999"): raise InvalidOperation
+            price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except (InvalidOperation, ValueError, TypeError):
+            return self._error(400, "Enter a valid price and a refund period of 0 or 3.")
+        fmt = clean["format"].lower()
+        status = str(item.get("status", "draft")).strip().lower()
+        if fmt not in ("digital", "physical", "service"): return self._error(400, "Choose Digital, Physical, or Service.")
+        if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
+        try:
+            product_id = int(item.get("id")) if item.get("id") not in (None, "") else None
+            if product_id is not None and product_id < 1: raise ValueError
+        except (TypeError, ValueError): return self._error(400, "Invalid product ID.")
+        now = int(time.time())
+        values = (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                  clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                  refund, price_cents, status, now)
+        with db(write=True) as conn:
+            duplicate = conn.execute(
+                "SELECT id FROM legitimate_products WHERE product_code = ? AND id != ?",
+                (clean["product_code"], product_id or -1),
+            ).fetchone()
+            if duplicate: return self._error(409, "That product ID is already in use.")
+            if product_id is None:
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products (name, description, category, format, seller, quality, market, state, "
+                    "product_code, expiry, intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, now, admin["id"]),
+                )
+                product_id = cursor.lastrowid
+                audit_action = "legitimate_product.create"
+            else:
+                existing = conn.execute("SELECT id FROM legitimate_products WHERE id = ?", (product_id,)).fetchone()
+                if existing is None: return self._error(404, "Product not found.")
+                conn.execute(
+                    "UPDATE legitimate_products SET name = ?, description = ?, format = ?, seller = ?, quality = ?, "
+                    "market = ?, state = ?, product_code = ?, expiry = ?, intended_country = ?, refund_period = ?, "
+                    "price_cents = ?, status = ?, updated_at = ? WHERE id = ?",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, product_id),
+                )
+                audit_action = "legitimate_product.update"
+            audit(conn, audit_action, actor=admin, target=str(product_id),
+                  detail="standalone catalogue; status=" + status, ip=self.client_address[0])
+        return self._json(200, {"ok": True, "id": product_id, "status": status})
+
 
     # ---------------- static files ----------------
 
