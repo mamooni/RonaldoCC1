@@ -11,7 +11,17 @@
     .catalogue__intro{margin-bottom:22px}
     .catalogue__intro h1{margin:0 0 8px;font-size:clamp(1.6rem,3vw,2.2rem)}
     .catalogue__intro p{margin:0;color:var(--muted,#8b929d)}
-    .catalogue__filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:12px;align-items:end;padding:18px;border:1px solid var(--line,#2a303a);border-radius:14px;background:var(--surface,#151a22);margin-bottom:20px}
+    .catalogue__filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto;gap:12px;align-items:end;padding:18px;border:1px solid var(--line,#2a303a);border-radius:14px;background:var(--surface,#151a22);margin-bottom:20px}
+    .catalogue__table-wrap{width:100%;overflow-x:auto;border:1px solid var(--line,#2a303a);border-radius:12px;background:var(--surface,#151a22)}
+    .catalogue__table{width:100%;border-collapse:collapse;min-width:1050px;text-align:left}
+    .catalogue__table th,.catalogue__table td{padding:14px 12px;border-bottom:1px solid var(--line,#2a303a);vertical-align:middle}
+    .catalogue__table th{font-size:.82rem;color:var(--muted,#a1a8b3);white-space:nowrap}
+    .catalogue__table td{font-size:.9rem}
+    .catalogue__table tbody tr:last-child td{border-bottom:0}
+    .catalogue__table .product-name{font-weight:650;min-width:190px}
+    .catalogue__table .price{font-weight:750;white-space:nowrap}
+    .catalogue__table .quality{white-space:nowrap}
+    .catalogue__table .product-id{font-variant-numeric:tabular-nums;white-space:nowrap}
     .catalogue__field{display:grid;gap:7px;min-width:0}
     .catalogue__field label{font-size:.82rem;color:var(--muted,#a1a8b3)}
     .catalogue__field input,.catalogue__field select{width:100%;min-height:42px;padding:9px 11px;border:1px solid var(--line,#343b47);border-radius:8px;background:var(--bg,#10141b);color:inherit}
@@ -30,8 +40,8 @@
     .catalogue__pager{display:flex;justify-content:center;gap:8px;margin-top:22px}
     .catalogue__pager button{padding:8px 13px;border:1px solid var(--line,#343b47);border-radius:8px;background:var(--surface,#151a22);color:inherit;cursor:pointer}
     .catalogue__pager button[aria-current="page"]{border-color:var(--accent,#7c8cff)}
-    @media(max-width:850px){.catalogue__filters{grid-template-columns:repeat(2,minmax(0,1fr))}.catalogue__filters .catalogue__field:first-child{grid-column:1/-1}.catalogue__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:560px){.catalogue__filters{grid-template-columns:1fr}.catalogue__filters .catalogue__field:first-child{grid-column:auto}.catalogue__grid{grid-template-columns:1fr}.catalogue__meta{align-items:flex-start;flex-direction:column}}
+    @media(max-width:850px){.catalogue__filters{grid-template-columns:repeat(2,minmax(0,1fr))}.catalogue__filters .catalogue__field:first-child{grid-column:1/-1}}
+    @media(max-width:560px){.catalogue__filters{grid-template-columns:1fr}.catalogue__filters .catalogue__field:first-child{grid-column:auto}.catalogue__meta{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body>
@@ -51,45 +61,13 @@
     </header>
 
     <form class="catalogue__filters" id="catalogueFilters">
-      <div class="catalogue__field">
-        <label for="productQuery">Search products</label>
-        <input id="productQuery" type="search" placeholder="Search by product name or description" autocomplete="off">
-      </div>
-      <div class="catalogue__field">
-        <label for="productCategory">Category</label>
-        <select id="productCategory"><option value="">All categories</option></select>
-      </div>
-      <div class="catalogue__field">
-        <label for="productFormat">Format</label>
-        <select id="productFormat">
-          <option value="">All formats</option>
-          <option value="physical">Physical</option>
-          <option value="digital">Digital</option>
-          <option value="service">Service</option>
-        </select>
-      </div>
-      <div class="catalogue__field">
-        <label for="productSort">Sort by</label>
-        <select id="productSort">
-          <option value="newest">Newest</option>
-          <option value="price-low">Price: low to high</option>
-          <option value="price-high">Price: high to low</option>
-          <option value="name">Name: A to Z</option>
-        </select>
-      </div>
-      <button class="btn btn--primary" type="submit">Search</button>
-      <div class="catalogue__field">
-        <label for="minPrice">Minimum price</label>
-        <input id="minPrice" type="number" min="0" step="0.01" placeholder="0">
-      </div>
-      <div class="catalogue__field">
-        <label for="maxPrice">Maximum price</label>
-        <input id="maxPrice" type="number" min="0" step="0.01" placeholder="No limit">
-      </div>
-      <div class="catalogue__field">
-        <label for="productPageSize">Products per page</label>
-        <select id="productPageSize"><option>9</option><option>18</option><option>36</option></select>
-      </div>
+      <div class="catalogue__field"><label for="productQuery">Search products</label><input id="productQuery" type="search" placeholder="Search product or seller" autocomplete="off"></div>
+      <div class="catalogue__field"><label for="productMarket">Market</label><select id="productMarket"><option value="">All countries</option></select></div>
+      <div class="catalogue__field"><label for="productFormat">Format</label><select id="productFormat"><option value="">All formats</option><option value="physical">Physical</option><option value="digital">Digital</option><option value="service">Service</option></select></div>
+      <div class="catalogue__field"><label for="productSort">Sort by</label><select id="productSort"><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="name">Name: A to Z</option></select></div>
+      <div class="catalogue__field"><label for="minPrice">Minimum price (USD)</label><input id="minPrice" type="number" min="0" step="0.01" placeholder="0"></div>
+      <div class="catalogue__field"><label for="maxPrice">Maximum price (USD)</label><input id="maxPrice" type="number" min="0" step="0.01" placeholder="No limit"></div>
+      <div class="catalogue__field"><label for="productPageSize">Rows per page</label><select id="productPageSize"><option>10</option><option>25</option><option>50</option></select></div>
       <button class="btn" type="reset" id="resetFilters">Clear filters</button>
     </form>
 
@@ -97,9 +75,9 @@
       <span id="resultCount" aria-live="polite">Loading products…</span>
       <span id="catalogueStatus" role="status"></span>
     </div>
-    <section class="catalogue__grid" id="productGrid" aria-label="Products">
-      <div class="catalogue__empty">Loading the product catalogue…</div>
-    </section>
+    <div class="catalogue__table-wrap"><table class="catalogue__table" aria-label="Products"><thead><tr>
+      <th>Product</th><th>Seller</th><th>Quality</th><th>ID</th><th>ExpDate</th><th>Address</th><th>Refund period</th><th>Price</th>
+    </tr></thead><tbody id="productRows"><tr><td colspan="8" class="catalogue__empty">Loading the product catalogue…</td></tr></tbody></table></div>
     <nav class="catalogue__pager" id="productPager" aria-label="Product pages"></nav>
   </main>
 
