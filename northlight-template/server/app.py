@@ -1225,11 +1225,11 @@ def init_mysql():
             "UNIQUE KEY legitimate_products_code (product_code), "
             "KEY legitimate_products_public (status, created_at, id), "
             "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
-            "CONSTRAINT legitimate_products_format CHECK (format IN ('physical', 'digital', 'service')), "
             "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
         _ensure_legitimate_catalogue_columns(conn)
+        _migrate_legitimate_format_values(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
             "product_id VARCHAR(64) NOT NULL PRIMARY KEY, "
@@ -5116,9 +5116,9 @@ class Handler(BaseHTTPRequestHandler):
             price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         except (InvalidOperation, ValueError, TypeError):
             return self._error(400, "Enter a valid price and a refund period of 0 or 3.")
-        fmt = clean["format"].lower()
+        fmt = clean["format"].strip()
+        if not fmt: return self._error(400, "Enter a format.")
         status = str(item.get("status", "draft")).strip().lower()
-        if fmt not in ("digital", "physical", "service"): return self._error(400, "Choose Digital, Physical, or Service.")
         if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
         try:
             product_id = int(item.get("id")) if item.get("id") not in (None, "") else None
