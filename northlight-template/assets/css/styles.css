@@ -817,6 +817,15 @@ button.menu__item {
   text-align: left;
 }
 
+.drop__heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  flex: 1;
+  min-width: 0;
+}
+
 .drop__title {
   font-size: 14px;
   font-weight: 600;
@@ -826,6 +835,7 @@ button.menu__item {
 .drop__from {
   color: var(--text-mute);
   font-weight: 500;
+  font-size: 12.5px;
 }
 
 .drop__from b {
@@ -2991,6 +3001,17 @@ button.menu__item {
   .drop__head {
     padding: 13px;
     gap: 10px;
+  }
+
+  .drop__heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .drop__from { 
+    margin-top: 0;
+    line-height: 1.35;
   }
 
   .drop__title {
