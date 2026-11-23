@@ -21,8 +21,8 @@ function parseCsv(text){
   if(quoted){if(ch==='"'&&text[i+1]==='"'){field+='"';i++;}else if(ch==='"'){quoted=false;}else{field+=ch;}}
   else if(ch==='"'&&field===""){quoted=true;}
   else if(ch===","){row.push(field);field="";}
-  else if(ch==="\\n"){row.push(field);rows.push(row);row=[];field="";}
-  else if(ch==="\\r"){if(text[i+1]==="\\n")i++;row.push(field);rows.push(row);row=[];field="";}
+  else if(ch==="\n"){row.push(field);rows.push(row);row=[];field="";}
+  else if(ch==="\r"){if(text[i+1]==="\n")i++;row.push(field);rows.push(row);row=[];field="";}
   else{field+=ch;}
  }
  if(quoted)throw new Error("CSV contains an unclosed quoted field.");
@@ -35,7 +35,7 @@ previewButton.addEventListener("click",async()=>{
  const file=csvFile.files&&csvFile.files[0];if(!file){csvMessage.textContent="Choose a CSV file first.";return;}
  if(file.size>120*1024){csvMessage.textContent="CSV is too large. Keep it under 120 KB.";return;}
  try{
-  const raw=(await file.text()).replace(/^\\uFEFF/,""),parsed=parseCsv(raw);
+  const raw=(await file.text()).replace(/^\uFEFF/,""),parsed=parseCsv(raw);
   const headers=(parsed.shift()||[]).map(x=>x.trim().toLowerCase());
   const expected=["name","description","category","format","seller","price","image_url","status"];
   if(headers.length!==expected.length||expected.some((h,i)=>headers[i]!==h))throw new Error("CSV headers must be exactly: "+expected.join(", "));
