@@ -898,15 +898,26 @@ def _has_table(conn, name: str) -> bool:
 def _ensure_legitimate_catalogue_columns(conn):
     """Add fields to the isolated legitimate catalogue without touching legacy inventory."""
     columns = _table_columns(conn, "legitimate_products")
-    additions = {
-        "quality": "TEXT NOT NULL DEFAULT 'Very High'",
-        "market": "TEXT NOT NULL DEFAULT ''",
-        "state": "TEXT NOT NULL DEFAULT ''",
-        "product_code": "TEXT",
-        "expiry": "TEXT NOT NULL DEFAULT ''",
-        "intended_country": "TEXT NOT NULL DEFAULT ''",
-        "refund_period": "INTEGER NOT NULL DEFAULT 0",
-    }
+    if DB_KIND == "mysql":
+        additions = {
+            "quality": "VARCHAR(40) NOT NULL DEFAULT 'Very High'",
+            "market": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "state": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "product_code": "VARCHAR(6) NULL",
+            "expiry": "VARCHAR(7) NOT NULL DEFAULT ''",
+            "intended_country": "CHAR(2) NOT NULL DEFAULT ''",
+            "refund_period": "TINYINT NOT NULL DEFAULT 0",
+        }
+    else:
+        additions = {
+            "quality": "TEXT NOT NULL DEFAULT 'Very High'",
+            "market": "TEXT NOT NULL DEFAULT ''",
+            "state": "TEXT NOT NULL DEFAULT ''",
+            "product_code": "TEXT",
+            "expiry": "TEXT NOT NULL DEFAULT ''",
+            "intended_country": "TEXT NOT NULL DEFAULT ''",
+            "refund_period": "INTEGER NOT NULL DEFAULT 0",
+        }
     for name, definition in additions.items():
         if name not in columns:
             conn.execute("ALTER TABLE legitimate_products ADD COLUMN " + name + " " + definition)
