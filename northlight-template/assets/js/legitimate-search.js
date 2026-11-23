@@ -22,7 +22,7 @@ function filteredProducts(){
   return (!q||searchable.includes(q))&&(!market||clean(p.market)===market)&&(!format||clean(p.format).toLowerCase()===format)&&Number.isFinite(price)&&price>=min&&price<=max;
  });
  const sort=els.sort.value;
- list.sort((a,b)=>sort==="price-low"?Number(a.price)-Number(b.price):sort==="price-high"?Number(b.price)-Number(a.price):sort==="name"?clean(a.name).localeCompare(clean(b.name)):sort==="newest"?new Date(b.created_at||0)-new Date(a.created_at||0):new Date(a.created_at||0)-new Date(b.created_at||0));
+ list.sort((a,b)=>sort==="price-low"?Number(a.price)-Number(b.price):sort==="price-high"?Number(b.price)-Number(a.price):sort==="name"?clean(a.name).localeCompare(clean(b.name)):sort==="newest"?new Date(b.created_at||0)-new Date(a.created_at||0):Number(a.id||0)-Number(b.id||0));
  return list;
 }
 function render(){
