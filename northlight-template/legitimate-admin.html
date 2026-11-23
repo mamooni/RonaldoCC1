@@ -2,29 +2,35 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Legitimate Products Admin</title><link rel="stylesheet" href="assets/css/styles.css">
 <style>
-.lp-admin{max-width:1100px;margin:32px auto;padding:0 18px}.lp-panel{background:var(--surface,#fff);border:1px solid var(--line,#ddd);border-radius:14px;padding:20px;margin:18px 0}
-.lp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.lp-field{display:flex;flex-direction:column;gap:6px}
+.lp-admin{max-width:1200px;margin:32px auto;padding:0 18px}.lp-panel{background:var(--surface,#fff);border:1px solid var(--line,#ddd);border-radius:14px;padding:20px;margin:18px 0}
+.lp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.lp-field{display:flex;flex-direction:column;gap:6px}
 .lp-field input,.lp-field textarea,.lp-field select{width:100%;padding:11px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}
-.lp-field textarea{min-height:110px;resize:vertical}.lp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.lp-field textarea{min-height:90px;resize:vertical}.lp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .lp-button{padding:10px 15px;border:1px solid var(--line,#bbb);border-radius:8px;cursor:pointer;background:var(--accent,#222);color:white}
 .lp-button.secondary{background:transparent;color:inherit}.lp-list{display:grid;gap:10px}.lp-item{border:1px solid var(--line,#ddd);border-radius:10px;padding:14px;display:flex;justify-content:space-between;gap:16px;align-items:center}
 .lp-item p{margin:5px 0;color:var(--muted,#777)}.lp-status{font-size:12px;text-transform:uppercase;letter-spacing:.05em}#lpMessage{min-height:24px}
-@media(max-width:650px){.lp-grid{grid-template-columns:1fr}.lp-item{align-items:flex-start;flex-direction:column}}
+#csvPreview{overflow-x:auto}#csvPreview table{border-collapse:collapse;width:100%;font-size:.85rem}#csvPreview th,#csvPreview td{padding:8px;border-bottom:1px solid var(--line,#ddd);text-align:left}
+@media(max-width:850px){.lp-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.lp-grid{grid-template-columns:1fr}.lp-item{align-items:flex-start;flex-direction:column}}
 </style></head><body><main class="lp-admin">
-<h1>Legitimate products</h1><p>Manage the separate public catalogue. These products do not use the site's wallet, cart, checkout, or other marketplace inventory.</p>
+<h1>Legitimate digital goods</h1><p>Manage the isolated legitimate-products catalogue. It has no connection to the legacy marketplace wallet, cart, checkout, or inventory.</p>
 <section class="lp-panel"><h2 id="formHeading">Add a product</h2><form id="productForm"><input type="hidden" id="productId">
 <div class="lp-grid">
-<label class="lp-field">Product name<input id="name" maxlength="160" required></label>
-<label class="lp-field">Category<input id="category" maxlength="100" required placeholder="Electronics, clothing, etc."></label>
-<label class="lp-field">Format<select id="format"><option value="physical">Physical</option><option value="digital">Digital</option><option value="service">Service</option></select></label>
+<label class="lp-field">Product<input id="name" maxlength="160" required></label>
+<label class="lp-field">Market (country)<input id="market" maxlength="100" placeholder="United States" required></label>
+<label class="lp-field">State / province<input id="state" maxlength="100" placeholder="California" required></label>
+<label class="lp-field">Format<select id="format"><option value="digital">Digital</option><option value="physical">Physical</option><option value="service">Service</option></select></label>
+<label class="lp-field">Seller<input id="seller" maxlength="100" required></label>
+<label class="lp-field">Quality<input id="quality" value="Very High" readonly></label>
 <label class="lp-field">Price (USD)<input id="price" type="number" min="0" step="0.01" required></label>
-<label class="lp-field">Seller<input id="seller" maxlength="100"></label>
-<label class="lp-field">Image path<input id="imageUrl" maxlength="1000" placeholder="/assets/images/product.jpg"></label>
-<label class="lp-field">Publication status<select id="status"><option value="draft">Save as draft</option><option value="published">Publish now</option></select></label>
-<label class="lp-field">Description<textarea id="description" maxlength="4000" required></textarea></label></div>
-<div class="lp-actions"><button class="lp-button" type="submit">Save product</button><button class="lp-button secondary" type="button" id="resetForm">Clear form</button></div></form><p id="lpMessage" role="status"></p></section>
+<label class="lp-field">Product ID (six digits)<input id="productCode" inputmode="numeric" pattern="(42|47|51|34|37)[0-9]{4}" maxlength="6" required></label>
+<label class="lp-field">Expiry (MM/YYYY)<input id="expiry" placeholder="01/2027" pattern="(0[1-9]|1[0-2])/[0-9]{4}" required></label>
+<label class="lp-field">Intended country code<input id="intendedCountry" maxlength="2" placeholder="US" required></label>
+<label class="lp-field">Refund period (days)<select id="refundPeriod"><option value="0">0</option><option value="3">3</option></select></label>
+<label class="lp-field">Publication status<select id="status"><option value="draft">Draft</option><option value="published">Published</option></select></label>
+<label class="lp-field" style="grid-column:1/-1">Description<textarea id="description" maxlength="4000" required>Good</textarea></label>
+</div><div class="lp-actions"><button class="lp-button" type="submit">Save product</button><button class="lp-button secondary" type="button" id="resetForm">Clear form</button></div></form><p id="lpMessage" role="status"></p></section>
 <section class="lp-panel" id="csvImportPanel"><h2>Bulk import from CSV</h2>
-<p>Upload your edited catalogue CSV to preview it before importing. Every imported item is forced to <strong>Draft</strong>, even if the CSV status column says published.</p>
+<p>Expected columns: Product, Market, State, Format, Seller, Quality, Price, ID, Expiry, Status, Intended country, Refund period, Description. Imported products are always saved as <strong>Draft</strong>.</p>
 <div class="lp-actions"><input id="csvFile" type="file" accept=".csv,text/csv"><button class="lp-button secondary" id="previewCsv" type="button">Preview CSV</button><button class="lp-button" id="importCsv" type="button" disabled>Import drafts</button></div>
 <p id="csvMessage" role="status" aria-live="polite"></p><div id="csvPreview"></div></section>
 <section class="lp-panel"><h2>Saved products</h2><div id="productList" class="lp-list">Loading products…</div></section>
