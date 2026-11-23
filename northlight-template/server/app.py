@@ -354,6 +354,13 @@ CREATE TABLE IF NOT EXISTS legitimate_products (
     category TEXT NOT NULL,
     format TEXT NOT NULL CHECK (format IN ('physical', 'digital', 'service')),
     seller TEXT NOT NULL DEFAULT '',
+    quality TEXT NOT NULL DEFAULT 'Very High',
+    market TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    product_code TEXT,
+    expiry TEXT NOT NULL DEFAULT '',
+    intended_country TEXT NOT NULL DEFAULT '',
+    refund_period INTEGER NOT NULL DEFAULT 0 CHECK (refund_period IN (0, 3)),
     price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
     image_url TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
@@ -363,6 +370,8 @@ CREATE TABLE IF NOT EXISTS legitimate_products (
 );
 CREATE INDEX IF NOT EXISTS legitimate_products_public
     ON legitimate_products(status, created_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS legitimate_products_code
+    ON legitimate_products(product_code);
 
 CREATE TABLE IF NOT EXISTS postcodes (
     country    TEXT NOT NULL,
@@ -888,6 +897,38 @@ def _has_table(conn, name: str) -> bool:
     )
 
 
+def _ensure_legitimate_catalogue_columns(conn):
+    """Add fields to the isolated legitimate catalogue without touching legacy inventory."""
+    columns = _table_columns(conn, "legitimate_products")
+    additions = {
+        "quality": "TEXT NOT NULL DEFAULT 'Very High'",
+        "market": "TEXT NOT NULL DEFAULT ''",
+        "state": "TEXT NOT NULL DEFAULT ''",
+        "product_code": "TEXT",
+        "expiry": "TEXT NOT NULL DEFAULT ''",
+        "intended_country": "TEXT NOT NULL DEFAULT ''",
+        "refund_period": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute("ALTER TABLE legitimate_products ADD COLUMN " + name + " " + definition)
+    if DB_KIND == "mysql":
+        index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("legitimate_products", "legitimate_products_code"),
+        ).fetchone()
+        if index is None:
+            conn.execute(
+                "CREATE UNIQUE INDEX legitimate_products_code ON legitimate_products(product_code)"
+            )
+    else:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS legitimate_products_code "
+            "ON legitimate_products(product_code)"
+        )
+
+
 def _migrate(conn):
     """Bring an existing database up to date without losing anything.
 
@@ -958,6 +999,7 @@ def _migrate(conn):
             print("  migrated payments.amount -> amount_cents (money is now in cents)")
 
     conn.executescript(PAYMENTS_TABLE)
+    _ensure_legitimate_catalogue_columns(conn)
     conn.executescript(PURCHASES_TABLE)
     conn.executescript(CHEAP_PRODUCT_ORDERS_TABLE)
     conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
@@ -1109,15 +1151,21 @@ def init_mysql():
             "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
             "name VARCHAR(160) NOT NULL, description TEXT NOT NULL, "
             "category VARCHAR(100) NOT NULL, format VARCHAR(20) NOT NULL, "
-            "seller VARCHAR(100) NOT NULL DEFAULT '', price_cents BIGINT NOT NULL, "
-            "image_url VARCHAR(1000) NOT NULL DEFAULT '', status VARCHAR(20) NOT NULL DEFAULT 'draft', "
+            "seller VARCHAR(100) NOT NULL DEFAULT '', quality VARCHAR(40) NOT NULL DEFAULT 'Very High', "
+            "market VARCHAR(100) NOT NULL DEFAULT '', state VARCHAR(100) NOT NULL DEFAULT '', "
+            "product_code VARCHAR(6) NULL, expiry VARCHAR(7) NOT NULL DEFAULT '', "
+            "intended_country CHAR(2) NOT NULL DEFAULT '', refund_period TINYINT NOT NULL DEFAULT 0, "
+            "price_cents BIGINT NOT NULL, image_url VARCHAR(1000) NOT NULL DEFAULT '', "
+            "status VARCHAR(20) NOT NULL DEFAULT 'draft', "
             "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, created_by INT UNSIGNED NULL, "
+            "UNIQUE KEY legitimate_products_code (product_code), "
             "KEY legitimate_products_public (status, created_at, id), "
             "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
             "CONSTRAINT legitimate_products_format CHECK (format IN ('physical', 'digital', 'service')), "
             "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
+        _ensure_legitimate_catalogue_columns(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
             "product_id VARCHAR(64) NOT NULL PRIMARY KEY, "
@@ -4821,7 +4869,11 @@ class Handler(BaseHTTPRequestHandler):
     def _legitimate_product_payload(row):
         return {
             "id": row["id"], "name": row["name"], "description": row["description"],
-            "category": row["category"], "format": row["format"], "seller": row["seller"],
+            "format": row["format"], "seller": row["seller"], "quality": row["quality"],
+            "product_code": row["product_code"], "expiry": row["expiry"],
+            "market": row["market"], "state": row["state"],
+            "address": ", ".join(part for part in (row["market"], row["state"]) if part),
+            "intended_country": row["intended_country"], "refund_period": int(row["refund_period"]),
             "price": round(int(row["price_cents"]) / 100, 2), "image_url": row["image_url"],
             "status": row["status"],
             "created_at": datetime.fromtimestamp(int(row["created_at"]), timezone.utc).isoformat(),
@@ -4831,9 +4883,9 @@ class Handler(BaseHTTPRequestHandler):
     def api_legitimate_products(self):
         with db() as conn:
             rows = conn.execute(
-                "SELECT id, name, description, category, format, seller, price_cents, image_url, "
-                "status, created_at, updated_at FROM legitimate_products "
-                "WHERE status = 'published' ORDER BY created_at DESC, id DESC"
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products WHERE status = 'published' ORDER BY created_at DESC, id DESC"
             ).fetchall()
         return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
 
@@ -4842,14 +4894,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "Admins only."})
         with db() as conn:
             rows = conn.execute(
-                "SELECT id, name, description, category, format, seller, price_cents, image_url, "
-                "status, created_at, updated_at FROM legitimate_products ORDER BY created_at DESC, id DESC"
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products ORDER BY created_at DESC, id DESC"
             ).fetchall()
         return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
 
+    @staticmethod
+    def _legitimate_country_codes():
+        return {
+            "united states": "US", "united kingdom": "GB", "canada": "CA",
+            "australia": "AU", "germany": "DE", "france": "FR", "india": "IN",
+        }
 
     def api_admin_import_legitimate_products(self, payload):
-        """Import a bounded batch into the isolated catalogue as drafts only."""
+        """Import the separate legitimate catalogue as drafts only."""
         admin = self._require_admin()
         if admin is None:
             return self._json(403, {"error": "Admins only."})
@@ -4859,47 +4918,52 @@ class Handler(BaseHTTPRequestHandler):
         if len(items) > 200:
             return self._error(400, "A single import is limited to 200 products.")
 
-        required = ("name", "description", "category", "seller", "image_url")
-        limits = {"name": 160, "description": 4000, "category": 100, "seller": 100, "image_url": 1000}
-        clean_items, errors = [], []
+        country_codes = self._legitimate_country_codes()
+        clean_items, errors, seen_codes = [], [], set()
         for index, item in enumerate(items, start=2):
             if not isinstance(item, dict):
                 errors.append({"row": index, "error": "Invalid row."})
                 continue
-            clean, problem = {}, None
-            for key in required:
-                value = item.get(key, "")
-                if key == "price":
-                    continue
-                if not isinstance(value, str):
-                    problem = key + " must be text."
-                    break
-                value = value.strip()
-                if key in ("name", "description", "category") and not value:
-                    problem = key + " is required."
-                    break
-                if len(value) > limits[key]:
-                    problem = key + " is too long."
-                    break
-                clean[key] = value
-            fmt = str(item.get("format", "")).strip().lower()
-            if not problem and fmt not in ("physical", "digital", "service"):
-                problem = "Format must be physical, digital, or service."
-            image_url = clean.get("image_url", "")
-            if not problem and image_url and not (image_url.startswith("/") and not image_url.startswith("//")):
-                problem = "Image path must begin with one slash."
+            clean = {key: str(item.get(key, "")).strip() for key in (
+                "name", "market", "state", "format", "seller", "quality", "product_code",
+                "expiry", "status", "intended_country", "description"
+            )}
+            problem = None
+            if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+                problem = "Required fields are missing."
+            market_code = country_codes.get(clean["market"].lower())
+            if not problem and (not market_code or clean["intended_country"].upper() != market_code):
+                problem = "Intended country must match the selected Market."
+            if not problem and clean["quality"] != "Very High":
+                problem = "Quality must be Very High."
+            if not problem and clean["format"].lower() not in ("digital", "physical", "service"):
+                problem = "Format must be Digital, Physical, or Service."
+            if not problem and not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]):
+                problem = "ID must be six digits and begin with 42, 47, 51, 34, or 37."
+            if not problem and clean["product_code"] in seen_codes:
+                problem = "Duplicate ID in this CSV."
+            if not problem and not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]):
+                problem = "Expiry must use MM/YYYY."
+            try:
+                refund = int(item.get("refund_period"))
+                if refund not in (0, 3):
+                    raise ValueError
+            except (TypeError, ValueError):
+                refund = 0
+                problem = problem or "Refund period must be 0 or 3."
             try:
                 price = Decimal(str(item.get("price", "")).strip())
                 if not price.is_finite() or price < 0 or price > Decimal("99999999"):
                     raise InvalidOperation
                 price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
             except (InvalidOperation, ValueError, TypeError):
-                problem = problem or "Enter a valid non-negative price."
                 price_cents = 0
+                problem = problem or "Enter a valid non-negative price."
             if problem:
                 errors.append({"row": index, "error": problem})
                 continue
-            clean_items.append((clean, fmt, price_cents, index))
+            seen_codes.add(clean["product_code"])
+            clean_items.append((clean, refund, price_cents, index))
 
         if not clean_items:
             return self._json(400, {"error": "No valid rows to import.", "errors": errors})
@@ -4907,20 +4971,21 @@ class Handler(BaseHTTPRequestHandler):
         now = int(time.time())
         imported, duplicates = 0, []
         with db(write=True) as conn:
-            for clean, fmt, price_cents, row_number in clean_items:
+            for clean, refund, price_cents, row_number in clean_items:
                 exists = conn.execute(
-                    "SELECT id FROM legitimate_products WHERE LOWER(name) = LOWER(?) "
-                    "AND LOWER(category) = LOWER(?) LIMIT 1",
-                    (clean["name"], clean["category"]),
+                    "SELECT id FROM legitimate_products WHERE product_code = ?", (clean["product_code"],)
                 ).fetchone()
                 if exists:
-                    duplicates.append({"row": row_number, "name": clean["name"], "reason": "Duplicate name and category."})
+                    duplicates.append({"row": row_number, "name": clean["name"], "reason": "Duplicate product ID."})
                     continue
                 cursor = conn.execute(
-                    "INSERT INTO legitimate_products (name, description, category, format, seller, price_cents, "
-                    "image_url, status, created_at, updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)",
-                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
-                     price_cents, clean["image_url"], now, now, admin["id"]),
+                    "INSERT INTO legitimate_products "
+                    "(name, description, category, format, seller, quality, market, state, product_code, expiry, "
+                    "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'draft', ?, ?, ?)",
+                    (clean["name"], clean["description"], clean["format"].lower(), clean["seller"], clean["quality"],
+                     clean["market"], clean["state"], clean["product_code"], clean["expiry"],
+                     clean["intended_country"].upper(), refund, price_cents, now, now, admin["id"]),
                 )
                 imported += 1
                 audit(conn, "legitimate_product.import", actor=admin, target=str(cursor.lastrowid),
@@ -4951,58 +5016,70 @@ class Handler(BaseHTTPRequestHandler):
 
         item = payload.get("product")
         if not isinstance(item, dict): return self._error(400, "Product details are required.")
-        limits = {"name": 160, "description": 4000, "category": 100, "seller": 100, "image_url": 1000}
-        clean = {}
-        for key, limit in limits.items():
-            value = item.get(key, "")
-            if not isinstance(value, str): return self._error(400, key + " is invalid.")
-            value = value.strip()
-            if key in ("name", "description", "category") and not value: return self._error(400, key + " is required.")
-            if len(value) > limit: return self._error(400, key + " is too long.")
-            clean[key] = value
-        fmt = str(item.get("format", "")).strip().lower()
-        status = str(item.get("status", "draft")).strip().lower()
-        if fmt not in ("physical", "digital", "service"): return self._error(400, "Choose physical, digital, or service.")
-        if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
-        image_url = clean["image_url"]
-        if image_url and not (image_url.startswith("/") and not image_url.startswith("//")):
-            return self._error(400, "Image must be a local site path beginning with one slash.")
+        clean = {key: str(item.get(key, "")).strip() for key in (
+            "name", "market", "state", "format", "seller", "quality", "product_code",
+            "expiry", "intended_country", "description"
+        )}
+        if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+            return self._error(400, "All product fields are required.")
+        if clean["market"].lower() not in self._legitimate_country_codes() or clean["intended_country"].upper() != self._legitimate_country_codes()[clean["market"].lower()]:
+            return self._error(400, "Intended country must match Market.")
+        if clean["quality"] != "Very High": return self._error(400, "Quality must be Very High.")
+        if not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
+        if not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]): return self._error(400, "Expiry must use MM/YYYY.")
         try:
-            price = Decimal(str(item.get("price", "")))
+            refund = int(item.get("refund_period"))
+            if refund not in (0, 3): raise ValueError
+            price = Decimal(str(item.get("price", "")).strip())
             if not price.is_finite() or price < 0 or price > Decimal("99999999"): raise InvalidOperation
             price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         except (InvalidOperation, ValueError, TypeError):
-            return self._error(400, "Enter a valid non-negative price.")
+            return self._error(400, "Enter a valid price and a refund period of 0 or 3.")
+        fmt = clean["format"].lower()
+        status = str(item.get("status", "draft")).strip().lower()
+        if fmt not in ("digital", "physical", "service"): return self._error(400, "Choose Digital, Physical, or Service.")
+        if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
         try:
             product_id = int(item.get("id")) if item.get("id") not in (None, "") else None
             if product_id is not None and product_id < 1: raise ValueError
         except (TypeError, ValueError): return self._error(400, "Invalid product ID.")
         now = int(time.time())
+        values = (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                  clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                  refund, price_cents, status, now)
         with db(write=True) as conn:
+            duplicate = conn.execute(
+                "SELECT id FROM legitimate_products WHERE product_code = ? AND id != ?",
+                (clean["product_code"], product_id or -1),
+            ).fetchone()
+            if duplicate: return self._error(409, "That product ID is already in use.")
             if product_id is None:
                 cursor = conn.execute(
-                    "INSERT INTO legitimate_products (name, description, category, format, seller, price_cents, "
-                    "image_url, status, created_at, updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
-                     price_cents, image_url, status, now, now, admin["id"]),
+                    "INSERT INTO legitimate_products (name, description, category, format, seller, quality, market, state, "
+                    "product_code, expiry, intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, now, admin["id"]),
                 )
                 product_id = cursor.lastrowid
                 audit_action = "legitimate_product.create"
             else:
-                existing = conn.execute(
-                    "SELECT id FROM legitimate_products WHERE id = ?", (product_id,)
-                ).fetchone()
+                existing = conn.execute("SELECT id FROM legitimate_products WHERE id = ?", (product_id,)).fetchone()
                 if existing is None: return self._error(404, "Product not found.")
                 conn.execute(
-                    "UPDATE legitimate_products SET name = ?, description = ?, category = ?, format = ?, "
-                    "seller = ?, price_cents = ?, image_url = ?, status = ?, updated_at = ? WHERE id = ?",
-                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
-                     price_cents, image_url, status, now, product_id),
+                    "UPDATE legitimate_products SET name = ?, description = ?, format = ?, seller = ?, quality = ?, "
+                    "market = ?, state = ?, product_code = ?, expiry = ?, intended_country = ?, refund_period = ?, "
+                    "price_cents = ?, status = ?, updated_at = ? WHERE id = ?",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, product_id),
                 )
                 audit_action = "legitimate_product.update"
             audit(conn, audit_action, actor=admin, target=str(product_id),
                   detail="standalone catalogue; status=" + status, ip=self.client_address[0])
         return self._json(200, {"ok": True, "id": product_id, "status": status})
+
 
     # ---------------- static files ----------------
 
