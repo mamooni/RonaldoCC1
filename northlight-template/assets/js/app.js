@@ -105,15 +105,10 @@
     const table = make("table", "specs specs--boxed");
     const body = make("tbody");
 
+    body.appendChild(specRow("Country", clean(product.market) || "Not specified"));
     body.appendChild(specRow("Description", clean(product.description) || "No description provided."));
-    body.appendChild(specRow("Seller", clean(product.seller) || "Not specified"));
-    body.appendChild(specRow("Quality", clean(product.quality) || "Very High"));
-    body.appendChild(specRow("Format", clean(product.format) || "Not specified"));
-    body.appendChild(specRow("ID", clean(product.product_code) || "Not specified"));
-    body.appendChild(specRow("ExpDate", clean(product.expiry) || "Not specified"));
-    body.appendChild(specRow("Address", clean(product.address) || [product.market, product.state].map(clean).filter(Boolean).join(", ") || "Not specified"));
-    body.appendChild(specRow("Refund period", refundText(product.refund_period), Number(product.refund_period) > 1 ? "specs__val--yes" : (Number(product.refund_period) === 0 ? "specs__val--no" : "")));
-    body.appendChild(specRow("Price", money(product.price)));
+    const refundable = Number(product.refund_period ?? 0) > 0;
+    body.appendChild(specRow("Refundable", refundable ? "Yes" : "No", refundable ? "specs__val--yes" : "specs__val--no"));
 
     const actionRow = make("tr", "specs__actionRow");
     const actionCell = make("td");
