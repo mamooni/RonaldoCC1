@@ -245,7 +245,7 @@ SIGNUP_PATH = "/signup.html"
 
 # Files that must never be served as static content
 # Pages that require the admin role, not merely a session.
-ADMIN_PAGES = {"admin.html"}
+ADMIN_PAGES = {"admin.html", "legitimate-admin.html"}
 
 BLOCKED_PREFIXES = ("server/", "server\\", ".git/", ".arena/")
 BLOCKED_SUFFIXES = (
@@ -347,6 +347,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 
 -- postcode lookups are cached so a repeated check costs no API credit
+CREATE TABLE IF NOT EXISTS legitimate_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    format TEXT NOT NULL CHECK (format IN ('physical', 'digital', 'service')),
+    seller TEXT NOT NULL DEFAULT '',
+    price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+    image_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS legitimate_products_public
+    ON legitimate_products(status, created_at, id);
+
 CREATE TABLE IF NOT EXISTS postcodes (
     country    TEXT NOT NULL,
     code       TEXT NOT NULL,
@@ -1052,6 +1069,7 @@ MYSQL_TABLES = (
     "audit",
     "postcodes",
     "password_resets",
+    "legitimate_products",
 )
 
 
@@ -1084,6 +1102,20 @@ def init_mysql():
             "REFERENCES cheap_product_orders(id) ON DELETE CASCADE, "
             "CONSTRAINT cheap_order_items_price_positive CHECK (price_cents > 0), "
             "CONSTRAINT cheap_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_products ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "name VARCHAR(160) NOT NULL, description TEXT NOT NULL, "
+            "category VARCHAR(100) NOT NULL, format VARCHAR(20) NOT NULL, "
+            "seller VARCHAR(100) NOT NULL DEFAULT '', price_cents BIGINT NOT NULL, "
+            "image_url VARCHAR(1000) NOT NULL DEFAULT '', status VARCHAR(20) NOT NULL DEFAULT 'draft', "
+            "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, created_by INT UNSIGNED NULL, "
+            "KEY legitimate_products_public (status, created_at, id), "
+            "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
+            "CONSTRAINT legitimate_products_format CHECK (format IN ('physical', 'digital', 'service')), "
+            "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         )
         conn.execute(
@@ -1849,6 +1881,7 @@ POST_ROUTES = {
     "/api/admin/expensive-products/drafts/publish": "api_admin_publish_expensive_drafts",
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
+    "/api/admin/legitimate-products": "api_admin_legitimate_products",
 }
 
 GET_ROUTES = (
@@ -2133,6 +2166,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_admin_expensive_product_drafts()
         if path == "/api/bundles":
             return self.api_bundles()
+        if path == "/api/legitimate-products":
+            return self.api_legitimate_products()
+        if path == "/api/admin/legitimate-products":
+            return self.api_admin_legitimate_products_get()
         if path == "/api/expensive-products":
             return self.api_expensive_products()
         if path == "/api/product-check":
@@ -4775,6 +4812,110 @@ class Handler(BaseHTTPRequestHandler):
         if user is None:
             return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
         return self._json(200, {"user": user})
+
+
+    # -------- isolated legitimate-products catalogue (no checkout/wallet) --------
+
+    @staticmethod
+    def _legitimate_product_payload(row):
+        return {
+            "id": row["id"], "name": row["name"], "description": row["description"],
+            "category": row["category"], "format": row["format"], "seller": row["seller"],
+            "price": round(int(row["price_cents"]) / 100, 2), "image_url": row["image_url"],
+            "status": row["status"],
+            "created_at": datetime.fromtimestamp(int(row["created_at"]), timezone.utc).isoformat(),
+            "updated_at": int(row["updated_at"]),
+        }
+
+    def api_legitimate_products(self):
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, category, format, seller, price_cents, image_url, "
+                "status, created_at, updated_at FROM legitimate_products "
+                "WHERE status = 'published' ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    def api_admin_legitimate_products_get(self):
+        if self._require_admin() is None:
+            return self._json(403, {"error": "Admins only."})
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, category, format, seller, price_cents, image_url, "
+                "status, created_at, updated_at FROM legitimate_products ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    def api_admin_legitimate_products(self, payload):
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if not isinstance(payload, dict):
+            return self._error(400, "Invalid product request.")
+        if str(payload.get("action", "save")).strip().lower() == "delete":
+            try:
+                product_id = int(payload.get("id"))
+                if product_id < 1: raise ValueError
+            except (TypeError, ValueError):
+                return self._error(400, "A valid product ID is required.")
+            with db(write=True) as conn:
+                cursor = conn.execute("DELETE FROM legitimate_products WHERE id = ?", (product_id,))
+                if cursor.rowcount == 0: return self._error(404, "Product not found.")
+                audit(conn, "legitimate_product.delete", actor=admin, target=str(product_id),
+                      detail="standalone catalogue", ip=self.client_address[0])
+            return self._json(200, {"ok": True})
+
+        item = payload.get("product")
+        if not isinstance(item, dict): return self._error(400, "Product details are required.")
+        limits = {"name": 160, "description": 4000, "category": 100, "seller": 100, "image_url": 1000}
+        clean = {}
+        for key, limit in limits.items():
+            value = item.get(key, "")
+            if not isinstance(value, str): return self._error(400, key + " is invalid.")
+            value = value.strip()
+            if key in ("name", "description", "category") and not value: return self._error(400, key + " is required.")
+            if len(value) > limit: return self._error(400, key + " is too long.")
+            clean[key] = value
+        fmt = str(item.get("format", "")).strip().lower()
+        status = str(item.get("status", "draft")).strip().lower()
+        if fmt not in ("physical", "digital", "service"): return self._error(400, "Choose physical, digital, or service.")
+        if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
+        image_url = clean["image_url"]
+        if image_url and not (image_url.startswith("/") and not image_url.startswith("//")):
+            return self._error(400, "Image must be a local site path beginning with one slash.")
+        try:
+            price = Decimal(str(item.get("price", "")))
+            if not price.is_finite() or price < 0 or price > Decimal("99999999"): raise InvalidOperation
+            price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except (InvalidOperation, ValueError, TypeError):
+            return self._error(400, "Enter a valid non-negative price.")
+        try:
+            product_id = int(item.get("id")) if item.get("id") not in (None, "") else None
+            if product_id is not None and product_id < 1: raise ValueError
+        except (TypeError, ValueError): return self._error(400, "Invalid product ID.")
+        now = int(time.time())
+        with db(write=True) as conn:
+            if product_id is None:
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products (name, description, category, format, seller, price_cents, "
+                    "image_url, status, created_at, updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
+                     price_cents, image_url, status, now, now, admin["id"]),
+                )
+                product_id = cursor.lastrowid
+                audit_action = "legitimate_product.create"
+            else:
+                cursor = conn.execute(
+                    "UPDATE legitimate_products SET name = ?, description = ?, category = ?, format = ?, "
+                    "seller = ?, price_cents = ?, image_url = ?, status = ?, updated_at = ? WHERE id = ?",
+                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
+                     price_cents, image_url, status, now, product_id),
+                )
+                if cursor.rowcount == 0: return self._error(404, "Product not found.")
+                audit_action = "legitimate_product.update"
+            audit(conn, audit_action, actor=admin, target=str(product_id),
+                  detail="standalone catalogue; status=" + status, ip=self.client_address[0])
+        return self._json(200, {"ok": True, "id": product_id, "status": status})
 
     # ---------------- static files ----------------
 
