@@ -4757,7 +4757,7 @@ class Handler(BaseHTTPRequestHandler):
 
             products = conn.execute(
                 "SELECT id, title, price_cents FROM expensive_products "
-                f"WHERE status = 'published' AND id IN ({placeholders})",
+                f"WHERE id IN ({placeholders})",
                 tuple(product_ids),
             ).fetchall()
 
