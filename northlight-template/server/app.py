@@ -4883,7 +4883,8 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
                 "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
-                "FROM legitimate_products WHERE status = 'published' ORDER BY created_at DESC, id DESC"
+                "FROM legitimate_products WHERE status = 'published' AND product_code IS NOT NULL "
+                "AND market <> '' AND state <> '' ORDER BY created_at DESC, id DESC"
             ).fetchall()
         return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
 
@@ -4903,6 +4904,18 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "united states": "US", "united kingdom": "GB", "canada": "CA",
             "australia": "AU", "germany": "DE", "france": "FR", "india": "IN",
+        }
+
+    @staticmethod
+    def _legitimate_market_states():
+        return {
+            "united states": {"California", "New York", "Texas", "Florida", "Washington", "Illinois", "Georgia", "Arizona", "Colorado", "Massachusetts", "Nevada", "Oregon"},
+            "united kingdom": {"England", "Scotland", "Wales", "Northern Ireland"},
+            "canada": {"Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba", "Nova Scotia"},
+            "australia": {"New South Wales", "Victoria", "Queensland", "Western Australia", "South Australia", "Tasmania"},
+            "germany": {"Bavaria", "Berlin", "Hamburg", "Hesse", "North Rhine-Westphalia", "Saxony"},
+            "france": {"Île-de-France", "Auvergne-Rhône-Alpes", "Occitanie", "Nouvelle-Aquitaine", "Provence-Alpes-Côte d’Azur"},
+            "india": {"Maharashtra", "Karnataka", "Delhi", "Tamil Nadu", "Telangana", "Gujarat"},
         }
 
     def api_admin_import_legitimate_products(self, payload):
@@ -4929,9 +4942,12 @@ class Handler(BaseHTTPRequestHandler):
             problem = None
             if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
                 problem = "Required fields are missing."
-            market_code = country_codes.get(clean["market"].lower())
+            market_key = clean["market"].lower()
+            market_code = country_codes.get(market_key)
             if not problem and (not market_code or clean["intended_country"].upper() != market_code):
                 problem = "Intended country must match the selected Market."
+            if not problem and clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+                problem = "State or province does not match the selected Market."
             if not problem and clean["quality"] != "Very High":
                 problem = "Quality must be Very High."
             if not problem and clean["format"].lower() not in ("digital", "physical", "service"):
@@ -5020,8 +5036,11 @@ class Handler(BaseHTTPRequestHandler):
         )}
         if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
             return self._error(400, "All product fields are required.")
-        if clean["market"].lower() not in self._legitimate_country_codes() or clean["intended_country"].upper() != self._legitimate_country_codes()[clean["market"].lower()]:
+        market_key = clean["market"].lower()
+        if market_key not in self._legitimate_country_codes() or clean["intended_country"].upper() != self._legitimate_country_codes()[market_key]:
             return self._error(400, "Intended country must match Market.")
+        if clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+            return self._error(400, "State or province does not match Market.")
         if clean["quality"] != "Very High": return self._error(400, "Quality must be Very High.")
         if not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
         if not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]): return self._error(400, "Expiry must use MM/YYYY.")
