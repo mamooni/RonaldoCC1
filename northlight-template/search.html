@@ -1,4 +1,33 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Search Products</title><meta name="description" content="Search the Northlight legitimate product catalogue."><link rel="stylesheet" href="assets/css/styles.css"></head><body><header class="topbar"><div class="topbar__inner"><a class="topbar__logo" href="index.html" aria-label="Home"><img src="logo.png" alt="Northlight" class="topbar__logo-img"></a><div class="topbar__actions"><a class="icon-btn" href="legitimate-cart.html" id="legitCartBtn" aria-label="Shopping cart">🛒 <span class="badge" id="legitCartCount" hidden>0</span></a><a class="btn btn--primary" href="index.html">Home</a></div></div></header><nav class="subnav" aria-label="Sections"><div class="subnav__inner"><a class="tab" href="index.html">Home</a><a class="tab" href="search.html" aria-current="page">Product Catalogue</a><a class="tab" href="support.html">Support</a><a class="tab" href="legitimate-cart.html">Cart</a></div></nav><main class="page page--search"><h1 class="search__title">Search Products</h1>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Search Products</title><meta name="description" content="Search the Northlight legitimate product catalogue."><link rel="stylesheet" href="assets/css/styles.css"></head><body><header class="topbar">
+  <div class="topbar__inner">
+    <a class="topbar__logo" href="index.html" aria-label="Home">
+      <img src="logo.png" alt="Northlight" class="topbar__logo-img">
+    </a>
+
+    <div class="topbar__center">
+      <span class="btn btn--wallet" aria-label="Legitimate product catalogue">
+        <span class="btn__label">Product Catalogue</span>
+      </span>
+    </div>
+
+    <div class="topbar__actions">
+      <a class="icon-btn" href="legitimate-cart.html" id="legitCartBtn" aria-label="Shopping cart">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+          <path d="M7 4a3 3 0 0 1 10 0h2.5a1 1 0 0 1 1 .9l1 12A2 2 0 0 1 19.5 19h-15a2 2 0 0 1-2-2.1l1-12a1 1 0 0 1 1-.9H7Zm2 0h6a1 1 0 0 0-2-2h-2a1 1 0 0 0-2 2Z"/>
+        </svg>
+        <span class="badge" id="legitCartCount" hidden>0</span>
+      </a>
+    </div>
+  </div>
+</header>
+<nav class="subnav" aria-label="Sections">
+  <div class="subnav__inner">
+    <a class="tab" href="index.html">Home</a>
+    <a class="tab" href="search.html" aria-current="page">Product Catalogue</a>
+    <a class="tab" href="support.html">Support</a>
+    <a class="tab" href="legitimate-cart.html">Cart</a>
+  </div>
+</nav><main class="page page--search"><h1 class="search__title">Search Products</h1>
 <form class="filters" id="catalogueFilters" novalidate><div class="filters__grid">
 <div class="filters__col">
 <div class="field-sm"><label class="field-sm__label" for="productQuery">Product or Seller</label><input class="input-sm" id="productQuery" type="search" placeholder="Search products" autocomplete="off"></div>
