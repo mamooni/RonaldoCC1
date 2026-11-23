@@ -1200,6 +1200,8 @@ MYSQL_TABLES = (
     "expensive_product_order_items",
     "legitimate_product_orders",
     "legitimate_product_order_items",
+    "legitimate_product_orders",
+    "legitimate_product_order_items",
     "expensive_product_drafts",
     "audit",
     "postcodes",
@@ -1259,6 +1261,30 @@ def init_mysql():
         )
         _ensure_legitimate_catalogue_columns(conn)
         _migrate_legitimate_format_values(conn)
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_product_orders ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, "
+            "request_key CHAR(36) NOT NULL, total_cents BIGINT NOT NULL, full_name VARCHAR(190) NULL, "
+            "status VARCHAR(32) NOT NULL DEFAULT 'awaiting_customer_name', created_at BIGINT NOT NULL, "
+            "UNIQUE KEY legitimate_orders_request (user_id, request_key), "
+            "KEY legitimate_orders_user (user_id, id), "
+            "CONSTRAINT legitimate_orders_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, "
+            "CONSTRAINT legitimate_orders_total_positive CHECK (total_cents > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_product_order_items ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, order_id BIGINT UNSIGNED NOT NULL, "
+            "product_id BIGINT UNSIGNED NOT NULL, title VARCHAR(160) NOT NULL, price_cents BIGINT NOT NULL, "
+            "quantity INT UNSIGNED NOT NULL, UNIQUE KEY legitimate_order_product (order_id, product_id), "
+            "KEY legitimate_order_items_order (order_id), "
+            "CONSTRAINT legitimate_order_items_order_fk FOREIGN KEY (order_id) "
+            "REFERENCES legitimate_product_orders(id) ON DELETE CASCADE, "
+            "CONSTRAINT legitimate_order_items_price_positive CHECK (price_cents > 0), "
+            "CONSTRAINT legitimate_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
             "product_id VARCHAR(64) NOT NULL PRIMARY KEY, "
