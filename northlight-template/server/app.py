@@ -5072,7 +5072,7 @@ class Handler(BaseHTTPRequestHandler):
                       detail="CSV import; forced draft; row=" + str(row_number), ip=self.client_address[0])
         return self._json(200, {
             "ok": True, "imported": imported, "imported_ids": imported_ids, "duplicates": duplicates,
-            "errors": errors, "message": "Imported products are saved as drafts. Nothing was published."
+            "errors": errors, "message": "Import complete. Review and confirm publication of the newly imported rows."
         })
 
 
@@ -5108,8 +5108,8 @@ class Handler(BaseHTTPRequestHandler):
                     or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
                     or country_codes.get(market_key) != str(row["intended_country"]).upper()
                     or row["state"] not in self._legitimate_market_states().get(market_key, set())
-                    or not re.fullmatch(r"(?:42|47|51|34|37)\\d{4}", str(row["product_code"]))
-                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\\d{4}", str(row["expiry"]))
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", str(row["expiry"]))
                     or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
                     return self._error(409, "An imported row failed the publication checks. Nothing was published.")
             conn.execute(
