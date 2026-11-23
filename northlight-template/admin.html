@@ -9,6 +9,26 @@
       content="Admin console: users and payment review."
     />
     <link rel="stylesheet" href="assets/css/styles.css" />
+  
+    <style>
+      .lp-admin-panel{background:var(--surface,#fff);border:1px solid var(--line,#ddd);border-radius:14px;padding:20px;margin:18px 0}
+      .lp-admin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+      .lp-admin-field{display:flex;flex-direction:column;gap:6px}
+      .lp-admin-field input,.lp-admin-field textarea,.lp-admin-field select{width:100%;padding:11px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}
+      .lp-admin-field textarea{min-height:90px;resize:vertical}
+      .lp-admin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+      .lp-admin-button{padding:10px 15px;border:1px solid var(--line,#bbb);border-radius:8px;cursor:pointer;background:var(--accent,#222);color:white}
+      .lp-admin-button.secondary{background:transparent;color:inherit}
+      .lp-admin-list{display:grid;gap:10px}
+      .lp-admin-item{border:1px solid var(--line,#ddd);border-radius:10px;padding:14px;display:flex;justify-content:space-between;gap:16px;align-items:center}
+      .lp-admin-item p{margin:5px 0;color:var(--muted,#777)}
+      .lp-admin-status{font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+      #lpMessage{min-height:24px}#csvPreview{overflow-x:auto}
+      #csvPreview table{border-collapse:collapse;width:100%;font-size:.85rem}
+      #csvPreview th,#csvPreview td{padding:8px;border-bottom:1px solid var(--line,#ddd);text-align:left}
+      @media(max-width:850px){.lp-admin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      @media(max-width:600px){.lp-admin-grid{grid-template-columns:1fr}.lp-admin-item{align-items:flex-start;flex-direction:column}}
+    </style>
   </head>
 
   <body data-requires-auth>
@@ -603,6 +623,58 @@
         <button type="button" class="admin__refresh" id="loadMoreExpensiveProducts" hidden>Load more</button>
       </section>
 
+
+      <section class="admin__block lp-admin-panel" id="legitimateProductsAdmin">
+        <h2 class="admin__section">Legitimate catalogue products</h2>
+        <p class="admin__sub">Add and manage products for the separate legitimate catalogue from this admin page. These products remain separate from Expensive products.</p>
+        <h3 class="admin__section" id="formHeading">Add a product</h3>
+        <p class="admin__note" id="lpMessage" role="status"></p>
+        <form id="productForm">
+          <input type="hidden" id="productId">
+          <div class="lp-admin-grid">
+            <label class="lp-admin-field">Product<input id="name" maxlength="160" required></label>
+            <label class="lp-admin-field">Market (country)<input id="market" maxlength="100" placeholder="United States" required></label>
+            <label class="lp-admin-field">State / province<input id="state" maxlength="100" placeholder="California" required></label>
+            <label class="lp-admin-field">Format<input id="format" maxlength="255" placeholder="Enter format" required></label>
+            <label class="lp-admin-field">Seller<input id="seller" maxlength="100" required></label>
+            <label class="lp-admin-field">Quality<input id="quality" value="Very High" readonly></label>
+            <label class="lp-admin-field">Price (USD)<input id="price" type="number" min="0" step="0.01" required></label>
+            <label class="lp-admin-field">Product ID (six digits)<input id="productCode" inputmode="numeric" pattern="(42|47|51|34|37)[0-9]{4}" maxlength="6" required></label>
+            <label class="lp-admin-field">Expiry (MM/YYYY)<input id="expiry" placeholder="01/2027" pattern="(0[1-9]|1[0-2])/[0-9]{4}" required></label>
+            <label class="lp-admin-field">Intended country code<input id="intendedCountry" maxlength="2" placeholder="US" required></label>
+            <label class="lp-admin-field">Refund period (days)<select id="refundPeriod"><option value="0">0</option><option value="3">3</option></select></label>
+            <label class="lp-admin-field">Publication status<select id="status"><option value="draft">Draft</option><option value="published">Published</option></select></label>
+            <label class="lp-admin-field" style="grid-column:1/-1">Description<textarea id="description" maxlength="4000" required>Good</textarea></label>
+          </div>
+          <div class="lp-admin-actions">
+            <button class="lp-admin-button" type="submit">Save product</button>
+            <button class="lp-admin-button secondary" type="button" id="resetForm">Clear form</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="admin__block lp-admin-panel" id="legitimateCsvImportPanel">
+        <h2 class="admin__section">Import legitimate products from CSV</h2>
+        <p class="admin__sub">Imported products are first saved as drafts. You can then confirm publishing the newly imported products.</p>
+        <p><a href="legitimate-digital-goods-200-draft.csv" download>Download the draft sample CSV</a></p>
+        <div class="lp-admin-actions">
+          <input id="csvFile" type="file" accept=".csv,text/csv">
+          <button class="lp-admin-button secondary" id="previewCsv" type="button">Preview CSV</button>
+          <button class="lp-admin-button" id="importCsv" type="button" disabled>Import drafts</button>
+        </div>
+        <p id="csvMessage" role="status" aria-live="polite"></p>
+        <div id="csvPreview"></div>
+      </section>
+
+      <section class="admin__block lp-admin-panel" id="legitimateSavedProducts">
+        <h2 class="admin__section">Manage legitimate catalogue products</h2>
+        <div class="lp-admin-actions">
+          <button class="lp-admin-button" id="publishAllDrafts" type="button">Publish all drafts</button>
+        </div>
+        <p class="admin__sub">All drafts are validated before publication. If any draft fails validation, none will be published.</p>
+        <div id="productList" class="lp-admin-list">Loading legitimate products…</div>
+      </section>
+
     </main>
 
     <script src="assets/js/menu.js" defer></script>
@@ -611,6 +683,7 @@
     <script src="assets/js/countries.js" defer></script>
     <script src="assets/js/admin.js?v=20261123-1" defer></script>
     <script src="assets/js/expensive-products-admin.js?v=20261122-2" defer></script>
+    <script src="assets/js/legitimate-admin.js?v=20261123-1" defer></script>
     <script src="assets/js/session.js" defer></script>
   </body>
 </html>
