@@ -1882,6 +1882,7 @@ POST_ROUTES = {
     "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
     "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
     "/api/admin/legitimate-products": "api_admin_legitimate_products",
+    "/api/admin/legitimate-products/import": "api_admin_import_legitimate_products",
 }
 
 GET_ROUTES = (
@@ -4845,6 +4846,89 @@ class Handler(BaseHTTPRequestHandler):
                 "status, created_at, updated_at FROM legitimate_products ORDER BY created_at DESC, id DESC"
             ).fetchall()
         return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+
+    def api_admin_import_legitimate_products(self, payload):
+        """Import a bounded batch into the isolated catalogue as drafts only."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        items = payload.get("products") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or not items:
+            return self._error(400, "Upload a CSV containing at least one product.")
+        if len(items) > 200:
+            return self._error(400, "A single import is limited to 200 products.")
+
+        required = ("name", "description", "category", "format", "seller", "price", "image_url")
+        limits = {"name": 160, "description": 4000, "category": 100, "seller": 100, "image_url": 1000}
+        clean_items, errors = [], []
+        for index, item in enumerate(items, start=2):
+            if not isinstance(item, dict):
+                errors.append({"row": index, "error": "Invalid row."})
+                continue
+            clean, problem = {}, None
+            for key in required:
+                value = item.get(key, "")
+                if key == "price":
+                    continue
+                if not isinstance(value, str):
+                    problem = key + " must be text."
+                    break
+                value = value.strip()
+                if key in ("name", "description", "category") and not value:
+                    problem = key + " is required."
+                    break
+                if len(value) > limits[key]:
+                    problem = key + " is too long."
+                    break
+                clean[key] = value
+            fmt = str(item.get("format", "")).strip().lower()
+            if not problem and fmt not in ("physical", "digital", "service"):
+                problem = "Format must be physical, digital, or service."
+            image_url = clean.get("image_url", "")
+            if not problem and image_url and not (image_url.startswith("/") and not image_url.startswith("//")):
+                problem = "Image path must begin with one slash."
+            try:
+                price = Decimal(str(item.get("price", "")).strip())
+                if not price.is_finite() or price < 0 or price > Decimal("99999999"):
+                    raise InvalidOperation
+                price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            except (InvalidOperation, ValueError, TypeError):
+                problem = problem or "Enter a valid non-negative price."
+                price_cents = 0
+            if problem:
+                errors.append({"row": index, "error": problem})
+                continue
+            clean_items.append((clean, fmt, price_cents, index))
+
+        if not clean_items:
+            return self._json(400, {"error": "No valid rows to import.", "errors": errors})
+
+        now = int(time.time())
+        imported, duplicates = 0, []
+        with db(write=True) as conn:
+            for clean, fmt, price_cents, row_number in clean_items:
+                exists = conn.execute(
+                    "SELECT id FROM legitimate_products WHERE LOWER(name) = LOWER(?) "
+                    "AND LOWER(category) = LOWER(?) LIMIT 1",
+                    (clean["name"], clean["category"]),
+                ).fetchone()
+                if exists:
+                    duplicates.append({"row": row_number, "name": clean["name"], "reason": "Duplicate name and category."})
+                    continue
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products (name, description, category, format, seller, price_cents, "
+                    "image_url, status, created_at, updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)",
+                    (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
+                     price_cents, clean["image_url"], now, now, admin["id"]),
+                )
+                imported += 1
+                audit(conn, "legitimate_product.import", actor=admin, target=str(cursor.lastrowid),
+                      detail="CSV import; forced draft; row=" + str(row_number), ip=self.client_address[0])
+        return self._json(200, {
+            "ok": True, "imported": imported, "duplicates": duplicates,
+            "errors": errors, "message": "Imported products are saved as drafts. Nothing was published."
+        })
 
     def api_admin_legitimate_products(self, payload):
         admin = self._require_admin()
