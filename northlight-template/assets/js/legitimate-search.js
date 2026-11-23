@@ -3,9 +3,7 @@
 const API="/api/legitimate-products";
 const els={
  form:document.getElementById("catalogueFilters"),query:document.getElementById("productQuery"),
- market:document.getElementById("productMarket"),format:document.getElementById("productFormat"),
- sort:document.getElementById("productSort"),min:document.getElementById("minPrice"),
- max:document.getElementById("maxPrice"),size:document.getElementById("productPageSize"),
+ format:document.getElementById("productFormat"),
  rows:document.getElementById("productRows"),count:document.getElementById("resultCount"),
  status:document.getElementById("catalogueStatus"),pager:document.getElementById("productPager")
 };
@@ -15,18 +13,16 @@ const esc=v=>clean(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const money=v=>{const n=Number(v);return Number.isFinite(n)?"$"+n.toFixed(2):"Price on request";};
 const refundDisplay=v=>{const days=Number(v??0);if(Number.isFinite(days)&&days>1)return '<span class="status status--ok" title="'+days+' day refund period">✓</span>';if(Number.isFinite(days)&&days===0)return '<span class="status status--failed" title="No refund period">✕</span>';return esc(days)+ (days===1?" day":" days");};
 function filteredProducts(){
- const q=clean(els.query.value).toLowerCase(),market=els.market.value,format=els.format.value;
- const min=els.min.value===""?0:Number(els.min.value),max=els.max.value===""?Infinity:Number(els.max.value);
+ const q=clean(els.query.value).toLowerCase(),format=els.format.value;
  const list=products.filter(p=>{
-  const searchable=[p.name,p.seller,p.market,p.state,p.product_code].map(clean).join(" ").toLowerCase(),price=Number(p.price);
-  return (!q||searchable.includes(q))&&(!market||clean(p.market)===market)&&(!format||clean(p.format).toLowerCase()===format)&&Number.isFinite(price)&&price>=min&&price<=max;
+  const searchable=clean(p.name).toLowerCase();
+  return (!q||searchable.includes(q))&&(!format||clean(p.format).toLowerCase()===format);
  });
- const sort=els.sort.value;
- list.sort((a,b)=>sort==="price-low"?Number(a.price)-Number(b.price):sort==="price-high"?Number(b.price)-Number(a.price):sort==="name"?clean(a.name).localeCompare(clean(b.name)):sort==="newest"?new Date(b.created_at||0)-new Date(a.created_at||0):Number(a.id||0)-Number(b.id||0));
+ list.sort((a,b)=>Number(a.id||0)-Number(b.id||0));
  return list;
 }
 function render(){
- const list=filteredProducts(),size=Number(els.size.value)||10,pages=Math.max(1,Math.ceil(list.length/size));
+ const list=filteredProducts(),size=25,pages=Math.max(1,Math.ceil(list.length/size));
  page=Math.min(page,pages);const start=(page-1)*size,shown=list.slice(start,start+size);
  els.count.textContent=list.length+(list.length===1?" product":" products");
  if(!shown.length){els.rows.innerHTML='<tr><td colspan="10" class="catalogue__empty">'+(products.length?"No products match those filters.":"No products have been published yet.")+'</td></tr>';}
@@ -53,17 +49,11 @@ document.addEventListener("click",e=>{
  const old=btn.textContent;btn.textContent="Added";btn.disabled=true;
  setTimeout(()=>{btn.textContent=old;btn.disabled=false;},900);
 });
-function updateMarkets(){
- const current=els.market.value,markets=[...new Set(products.map(p=>clean(p.market)).filter(Boolean))].sort();
- els.market.innerHTML='<option value="">All countries</option>'+markets.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
- if(markets.includes(current))els.market.value=current;
-}
 async function loadProducts(){
- try{const response=await fetch(API,{headers:{"Accept":"application/json"}});if(!response.ok)throw new Error("Catalogue API returned "+response.status);const payload=await response.json();products=Array.isArray(payload)?payload:Array.isArray(payload.products)?payload.products:[];products=products.filter(p=>p&&p.status!=="draft");updateMarkets();els.status.textContent="";render();}
+ try{const response=await fetch(API,{headers:{"Accept":"application/json"}});if(!response.ok)throw new Error("Catalogue API returned "+response.status);const payload=await response.json();products=Array.isArray(payload)?payload:Array.isArray(payload.products)?payload.products:[];products=products.filter(p=>p&&p.status!=="draft");els.status.textContent="";render();}
  catch(error){products=[];els.status.textContent="The legitimate product feed is unavailable.";render();}
 }
 els.form.addEventListener("submit",e=>{e.preventDefault();page=1;render();});
-els.form.addEventListener("reset",()=>setTimeout(()=>{page=1;render();},0));
-[els.query,els.market,els.format,els.sort,els.min,els.max,els.size].forEach(c=>{c.addEventListener("input",()=>{page=1;render();});c.addEventListener("change",()=>{page=1;render();});});
+[els.query,els.format].forEach(c=>{c.addEventListener("input",()=>{page=1;render();});c.addEventListener("change",()=>{page=1;render();});});
 loadProducts();
 })();
