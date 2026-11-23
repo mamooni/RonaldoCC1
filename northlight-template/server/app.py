@@ -5148,8 +5148,8 @@ class Handler(BaseHTTPRequestHandler):
                     or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
                     or country_codes.get(market_key) != str(row["intended_country"]).upper()
                     or row["state"] not in market_states.get(market_key, set())
-                    or not re.fullmatch(r"(?:42|47|51|34|37)\\d{4}", str(row["product_code"]))
-                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\\d{4}", str(row["expiry"]))
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", str(row["expiry"]))
                     or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
                     invalid_ids.append(int(row["id"]))
 
