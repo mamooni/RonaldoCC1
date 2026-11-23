@@ -10,6 +10,11 @@ const els={
 let products=[],page=1;
 const clean=v=>String(v??"").trim();
 const esc=v=>clean(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const countryFlag=v=>{
+ const code=clean(v).toUpperCase();
+ if(!/^[A-Z]{2}$/.test(code))return "";
+ return String.fromCodePoint(...Array.from(code,char=>127397+char.charCodeAt(0)));
+};
 const money=v=>{const n=Number(v);return Number.isFinite(n)?"$"+n.toFixed(2):"Price on request";};
 const refundDisplay=v=>{const days=Number(v??0);if(Number.isFinite(days)&&days>1)return '<span class="status status--ok" title="'+days+' day refund period">✓</span>';if(Number.isFinite(days)&&days===0)return '<span class="status status--failed" title="No refund period">✕</span>';return esc(days)+ (days===1?" day":" days");};
 function filteredProducts(){
@@ -27,7 +32,7 @@ function render(){
  els.count.textContent=list.length+(list.length===1?" product":" products");
  if(!shown.length){els.rows.innerHTML='<tr><td colspan="10" class="catalogue__empty">'+(products.length?"No products match those filters.":"No products have been published yet.")+'</td></tr>';}
  else{
-  els.rows.innerHTML=shown.map(p=>'<tr><td class="product-name">'+esc(p.name)+'</td><td>'+esc(p.seller)+'</td><td class="quality">'+esc(p.quality||"Very High")+'</td><td class="product-id">'+esc(p.product_code)+'</td><td>'+esc(p.format||"—")+'</td><td>'+esc(p.expiry)+'</td><td>'+esc(p.address||[p.market,p.state].filter(Boolean).join(", "))+'</td><td>'+refundDisplay(p.refund_period)+'</td><td class="price">'+money(p.price)+'</td><td class="product-actions"><button class="btn" type="button" data-legit-add="'+esc(p.id||p.product_code)+'">Add to cart</button><button class="btn btn--primary" type="button" data-legit-buy="'+esc(p.id||p.product_code)+'">Buy now</button></td></tr>').join("");
+  els.rows.innerHTML=shown.map(p=>'<tr><td class="product-name">'+esc(p.name)+'</td><td>'+esc(p.seller)+'</td><td class="quality">'+esc(p.quality||"Very High")+'</td><td class="product-id">'+esc(p.product_code)+'</td><td>'+esc(p.format||"—")+'</td><td>'+esc(p.expiry)+'</td><td>'+(countryFlag(p.intended_country)?'<span class="country-flag" aria-hidden="true">'+countryFlag(p.intended_country)+'</span> ':'')+esc(p.address||[p.market,p.state].filter(Boolean).join(", "))+'</td><td>'+refundDisplay(p.refund_period)+'</td><td class="price">'+money(p.price)+'</td><td class="product-actions"><button class="btn" type="button" data-legit-add="'+esc(p.id||p.product_code)+'">Add to cart</button><button class="btn btn--primary" type="button" data-legit-buy="'+esc(p.id||p.product_code)+'">Buy now</button></td></tr>').join("");
  }
  els.pager.innerHTML="";
  if(pages>1){for(let n=1;n<=pages;n++){const b=document.createElement("button");b.type="button";b.textContent=String(n);if(n===page)b.setAttribute("aria-current","page");b.addEventListener("click",()=>{page=n;render();});els.pager.appendChild(b);}}
