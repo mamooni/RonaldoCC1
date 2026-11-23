@@ -4905,13 +4905,16 @@ class Handler(BaseHTTPRequestHandler):
                 product_id = cursor.lastrowid
                 audit_action = "legitimate_product.create"
             else:
-                cursor = conn.execute(
+                existing = conn.execute(
+                    "SELECT id FROM legitimate_products WHERE id = ?", (product_id,)
+                ).fetchone()
+                if existing is None: return self._error(404, "Product not found.")
+                conn.execute(
                     "UPDATE legitimate_products SET name = ?, description = ?, category = ?, format = ?, "
                     "seller = ?, price_cents = ?, image_url = ?, status = ?, updated_at = ? WHERE id = ?",
                     (clean["name"], clean["description"], clean["category"], fmt, clean["seller"],
                      price_cents, image_url, status, now, product_id),
                 )
-                if cursor.rowcount == 0: return self._error(404, "Product not found.")
                 audit_action = "legitimate_product.update"
             audit(conn, audit_action, actor=admin, target=str(product_id),
                   detail="standalone catalogue; status=" + status, ip=self.client_address[0])
