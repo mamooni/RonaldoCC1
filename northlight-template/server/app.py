@@ -1200,8 +1200,6 @@ MYSQL_TABLES = (
     "expensive_product_order_items",
     "legitimate_product_orders",
     "legitimate_product_order_items",
-    "legitimate_product_orders",
-    "legitimate_product_order_items",
     "expensive_product_drafts",
     "audit",
     "postcodes",
