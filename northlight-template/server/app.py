@@ -370,8 +370,6 @@ CREATE TABLE IF NOT EXISTS legitimate_products (
 );
 CREATE INDEX IF NOT EXISTS legitimate_products_public
     ON legitimate_products(status, created_at, id);
-CREATE UNIQUE INDEX IF NOT EXISTS legitimate_products_code
-    ON legitimate_products(product_code);
 
 CREATE TABLE IF NOT EXISTS postcodes (
     country    TEXT NOT NULL,
