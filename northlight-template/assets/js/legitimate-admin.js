@@ -44,7 +44,6 @@ previewButton.addEventListener("click",async()=>{
   const malformed=parsed.findIndex(values=>values.length!==expected.length);
   if(malformed!==-1)throw new Error("CSV row "+(malformed+2)+" does not contain exactly "+expected.length+" columns.");
   csvRows=parsed.map((values,index)=>{const row={};expected.forEach((key,i)=>row[key]=String(values[i]??"").trim());return {...row,_row:index+2};});
-  if(malformed.length)throw new Error("CSV rows have inconsistent columns. Check row "+malformed[0]._row+".");
   const missing=csvRows.filter(r=>!r.name||!r.description||!r.category||!r.price||!["physical","digital","service"].includes(r.format.toLowerCase()));
   const preview=csvRows.slice(0,8);
   csvPreview.innerHTML='<p><strong>'+csvRows.length+' rows loaded.</strong> Showing first '+preview.length+'. '+(missing.length?missing.length+' row(s) need checking for required values or format.':'Required fields appear present; server will validate all rows too.')+'</p><div style="overflow-x:auto"><table><thead><tr><th>Row</th><th>Name</th><th>Category</th><th>Format</th><th>Price</th><th>CSV status</th></tr></thead><tbody>'+preview.map(r=>'<tr><td>'+r._row+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.category)+'</td><td>'+esc(r.format)+'</td><td>'+esc(r.price)+'</td><td>'+esc(r.status)+'</td></tr>').join("")+'</tbody></table></div>';
