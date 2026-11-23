@@ -688,6 +688,32 @@ CREATE TABLE IF NOT EXISTS expensive_product_order_items (
 CREATE INDEX IF NOT EXISTS expensive_product_order_items_order
     ON expensive_product_order_items(order_id);
 """
+ 
+LEGITIMATE_PRODUCT_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS legitimate_product_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+    full_name TEXT,
+    status TEXT NOT NULL DEFAULT 'awaiting_customer_name'
+        CHECK (status IN ('awaiting_customer_name','awaiting_fulfilment','fulfilled')),
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS legitimate_product_orders_user ON legitimate_product_orders(user_id, id);
+CREATE TABLE IF NOT EXISTS legitimate_product_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES legitimate_product_orders(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    UNIQUE (order_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS legitimate_product_order_items_order ON legitimate_product_order_items(order_id);
+"""
+
 
 # Every privileged or money-moving action lands here, so a deposit can always
 # be traced back to the request that created it and the admin who decided it.
@@ -1029,6 +1055,7 @@ def _migrate(conn):
     _ensure_expensive_catalogue_dates(conn)
 
     conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
+    conn.executescript(LEGITIMATE_PRODUCT_ORDERS_TABLE)
     conn.executescript(AUDIT_TABLE)
     conn.executescript(PASSWORD_RESETS_TABLE)
     conn.execute(
@@ -1171,6 +1198,8 @@ MYSQL_TABLES = (
     "expensive_products",
     "expensive_product_orders",
     "expensive_product_order_items",
+    "legitimate_product_orders",
+    "legitimate_product_order_items",
     "expensive_product_drafts",
     "audit",
     "postcodes",
