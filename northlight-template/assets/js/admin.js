@@ -36,6 +36,8 @@
     cheapOrdersEmpty: document.getElementById("cheapOrdersEmpty"),
     expensiveOrdersBody: document.getElementById("expensiveOrdersBody"),
     expensiveOrdersEmpty: document.getElementById("expensiveOrdersEmpty"),
+    legitimateOrdersBody: document.getElementById("legitimateOrdersBody"),
+    legitimateOrdersEmpty: document.getElementById("legitimateOrdersEmpty"),
   };
 
   /* ------------------------------------------------------------- helpers -- */
@@ -247,6 +249,44 @@
     });
   }
 
+  function renderLegitimateOrders(orders) {
+    if (!ui.legitimateOrdersBody || !ui.legitimateOrdersEmpty) return;
+
+    ui.legitimateOrdersBody.innerHTML = "";
+    ui.legitimateOrdersEmpty.hidden = orders.length > 0;
+
+    orders.forEach(function (order) {
+      var tr = document.createElement("tr");
+      tr.appendChild(cell("#" + order.id, "atable__mono"));
+      tr.appendChild(cell(
+        (order.full_name || "Name not submitted") +
+        " (" + (order.username || "Unknown user") + ")"
+      ));
+
+      var summary = (order.items || []).map(function (item) {
+        return item.title + " × " + item.quantity +
+          " (" + money(item.price) + " each)";
+      }).join(" · ");
+
+      tr.appendChild(cell(summary || "No items recorded"));
+      tr.appendChild(cell(money(order.total), "atable__mono"));
+
+      var labels = {
+        awaiting_customer_name: "Awaiting customer name",
+        awaiting_fulfilment: "Awaiting fulfilment",
+        fulfilled: "Fulfilled"
+      };
+      var status = document.createElement("td");
+      status.appendChild(chip(
+        labels[order.status] || order.status,
+        order.status === "fulfilled" ? "ok" : "wait"
+      ));
+      tr.appendChild(status);
+      tr.appendChild(cell(stamp(order.created_at), "atable__when"));
+      ui.legitimateOrdersBody.appendChild(tr);
+    });
+  }
+
   function render(data) {
     var stats = data.stats || {};
 
@@ -261,6 +301,7 @@
     renderUsers(data.users || []);
     renderCheapOrders(data.cheap_orders || []);
     renderExpensiveOrders(data.expensive_orders || []);
+    renderLegitimateOrders(data.legitimate_orders || []);
 
     if (ui.stamp) {
       var now = new Date();
