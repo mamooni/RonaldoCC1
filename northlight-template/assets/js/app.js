@@ -16,6 +16,16 @@
   let rendered = 0;
 
   const clean = value => String(value ?? "").trim();
+  const monthOrder = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  function productNameDate(name) {
+    const value = clean(name);
+    const match = value.match(/^(\\d{1,2})\\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\\b|[-_\\s])/i)
+      || value.match(/^(\\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\b/i);
+    if (!match) return null;
+    const day = Number(match[1]);
+    const month = monthOrder[match[2].slice(0, 3).toLowerCase()];
+    return day >= 1 && day <= 31 && month ? { rank: month * 32 + day, label: day + " " + match[2].slice(0, 3) } : null;
+  }
   const money = value => {
     const amount = Number(value);
     return Number.isFinite(amount) ? "$" + amount.toFixed(2) : "Price on request";
@@ -184,26 +194,36 @@
       const products = (Array.isArray(payload) ? payload : payload.products || [])
         .filter(product => product && product.status !== "draft");
 
-      // Show the newest legitimate goods first, matching the public catalogue.
+      // Product-name date prefixes (e.g. 24Nov, 23Nov) are authoritative
+      // for homepage grouping, matching the Legitimate Goods catalogue.
       products.sort((a, b) => {
+        const nameDateA = productNameDate(a.name);
+        const nameDateB = productNameDate(b.name);
+        if (nameDateA && nameDateB && nameDateA.rank !== nameDateB.rank) return nameDateB.rank - nameDateA.rank;
+        if (nameDateA && !nameDateB) return -1;
+        if (nameDateB && !nameDateA) return 1;
         const timeDiff = (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0);
         return timeDiff || Number(b.id || 0) - Number(a.id || 0);
       });
 
       const byDate = new Map();
       products.forEach(product => {
-        const key = dateKey(product.created_at);
-        if (!byDate.has(key)) byDate.set(key, []);
-        byDate.get(key).push(product);
+        const namedDate = productNameDate(product.name);
+        const key = namedDate ? "named-" + namedDate.rank : "created-" + dateKey(product.created_at);
+        if (!byDate.has(key)) byDate.set(key, { title: namedDate ? namedDate.label : dateHeading(dateKey(product.created_at)), date: namedDate ? "" : (dateKey(product.created_at) === "undated" ? "" : formatDate(product.created_at)), products: [] });
+        byDate.get(key).products.push(product);
       });
 
       groups = Array.from(byDate.entries())
-        .sort((a, b) => b[0].localeCompare(a[0]))
-        .map(([key, items]) => ({
-          title: dateHeading(key),
-          date: key === "undated" ? "" : formatDate(items[0].created_at),
-          products: items
-        }));
+        .sort((a, b) => {
+          const aNamed = a[0].startsWith("named-");
+          const bNamed = b[0].startsWith("named-");
+          if (aNamed && bNamed) return Number(b[0].slice(6)) - Number(a[0].slice(6));
+          if (aNamed) return -1;
+          if (bNamed) return 1;
+          return b[0].slice(8).localeCompare(a[0].slice(8));
+        })
+        .map(([, group]) => group);
 
       feed.replaceChildren();
       if (!groups.length) {
