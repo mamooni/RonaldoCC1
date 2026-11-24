@@ -49,7 +49,7 @@ function setupCountryAutocomplete(){
    if(event.key==="ArrowDown"&&menu.classList.contains("open")){event.preventDefault();menu.querySelector(".lp-country-option[role=option]")?.focus();}
   });
   menu.addEventListener("click",event=>{
-   event.preventDefault();
+   event.preventDefault();event.stopPropagation();
    const option=event.target.closest("[data-country-name]");if(!option)return;
    const name=option.dataset.countryName,codeValue=option.dataset.countryCode;
    if(input===market){market.value=name;code.value=codeValue;}
@@ -57,12 +57,13 @@ function setupCountryAutocomplete(){
    updateStateOptions();menu.classList.remove("open");input.setAttribute("aria-expanded","false");
   });
  });
- document.querySelectorAll("[data-country-toggle]").forEach(button=>button.addEventListener("click",()=>{
+ document.querySelectorAll("[data-country-toggle]").forEach(button=>button.addEventListener("click",event=>{
+   event.preventDefault();event.stopPropagation();
   const config=configs.find(c=>c.input.id===button.dataset.countryToggle);if(!config)return;
   const isOpen=config.menu.classList.contains("open");
   closeMenus(config);
   if(isOpen){config.menu.classList.remove("open");config.input.setAttribute("aria-expanded","false");}
-  else{renderOptions(config);config.menu.classList.add("open");config.input.setAttribute("aria-expanded","true");config.input.focus();}
+  else{renderOptions(config);config.menu.classList.add("open");config.input.setAttribute("aria-expanded","true");}
  }));
  document.addEventListener("click",event=>{
   if(!event.target.closest(".lp-country-picker"))closeMenus(null);
