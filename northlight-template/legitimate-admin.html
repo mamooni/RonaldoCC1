@@ -4,7 +4,7 @@
 <style>
 .lp-admin{max-width:1200px;margin:32px auto;padding:0 18px}.lp-panel{background:var(--surface,#fff);border:1px solid var(--line,#ddd);border-radius:14px;padding:20px;margin:18px 0}
 .lp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.lp-field{display:flex;flex-direction:column;gap:6px}
-.lp-field input,.lp-field textarea,.lp-field select{width:100%;padding:11px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}
+.lp-field input,.lp-field textarea,.lp-field select{width:100%;padding:11px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit}\n.lp-country-picker{position:relative;display:flex;gap:6px}.lp-country-picker input{min-width:0;flex:1}.lp-country-toggle{width:44px;border:1px solid var(--line,#ccc);border-radius:8px;background:var(--bg,#fff);color:inherit;font-size:18px;cursor:pointer}.lp-country-menu{position:absolute;z-index:30;top:calc(100% + 4px);left:0;right:0;max-height:240px;overflow:auto;background:var(--surface,#fff);border:1px solid var(--line,#ccc);border-radius:8px;box-shadow:0 8px 24px #0002;display:none}.lp-country-menu.open{display:block}.lp-country-option{display:block;width:100%;padding:10px 12px;text-align:left;border:0;background:transparent;color:inherit;cursor:pointer}.lp-country-option:hover,.lp-country-option:focus{background:var(--line,#eee)}
 .lp-field textarea{min-height:90px;resize:vertical}.lp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .lp-button{padding:10px 15px;border:1px solid var(--line,#bbb);border-radius:8px;cursor:pointer;background:var(--accent,#222);color:white}
 .lp-button.secondary{background:transparent;color:inherit}.lp-list{display:grid;gap:10px}.lp-item{border:1px solid var(--line,#ddd);border-radius:10px;padding:14px;display:flex;justify-content:space-between;gap:16px;align-items:center}
@@ -16,7 +16,7 @@
 <section class="lp-panel"><h2 id="formHeading">Add a product</h2><form id="productForm"><input type="hidden" id="productId">
 <div class="lp-grid">
 <label class="lp-field">Product<input id="name" maxlength="160" required></label>
-<label class="lp-field">Market (country)<input id="market" maxlength="100" placeholder="United States" required></label>
+<label class="lp-field">Market (country)<div class="lp-country-picker"><input id="market" maxlength="100" placeholder="Choose or type a country" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="marketCountryMenu" required><button class="lp-country-toggle" type="button" data-country-toggle="market" aria-label="Show countries">▾</button><div class="lp-country-menu" id="marketCountryMenu" role="listbox"></div></div></label>
 <label class="lp-field">State / province<select id="state" required disabled><option value="">Choose a country first</option></select></label>
 <label class="lp-field">Format<input id="format" maxlength="255" placeholder="Enter any format" required></label>
 <label class="lp-field">Seller<input id="seller" maxlength="100" required></label>
@@ -24,7 +24,7 @@
 <label class="lp-field">Price (USD)<input id="price" type="number" min="0" step="0.01" required></label>
 <label class="lp-field">Product ID (six digits)<input id="productCode" inputmode="numeric" pattern="(42|47|51|34|37)[0-9]{4}" maxlength="6" required></label>
 <label class="lp-field">Expiry (MM/YYYY)<input id="expiry" placeholder="01/2027" pattern="(0[1-9]|1[0-2])/[0-9]{4}" required></label>
-<label class="lp-field">Intended country code<input id="intendedCountry" maxlength="2" placeholder="US" required></label>
+<label class="lp-field">Intended country code<div class="lp-country-picker"><input id="intendedCountry" maxlength="2" placeholder="Choose or type code" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="countryCodeMenu" required><button class="lp-country-toggle" type="button" data-country-toggle="intendedCountry" aria-label="Show country codes">▾</button><div class="lp-country-menu" id="countryCodeMenu" role="listbox"></div></div></label>
 <label class="lp-field">Refund period (days)<select id="refundPeriod"><option value="0">0</option><option value="3">3</option></select></label>
 <label class="lp-field">Publication status<select id="status"><option value="draft">Draft</option><option value="published">Published</option></select></label>
 <label class="lp-field" style="grid-column:1/-1">Description<textarea id="description" maxlength="4000" required>Good</textarea></label>
