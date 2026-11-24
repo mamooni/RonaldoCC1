@@ -184,9 +184,11 @@
       const products = (Array.isArray(payload) ? payload : payload.products || [])
         .filter(product => product && product.status !== "draft");
 
-      // Match the legitimate catalogue page: oldest database listing first.
-      // The API returns newest first, so sort explicitly before grouping.
-      products.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+      // Show the newest legitimate goods first, matching the public catalogue.
+      products.sort((a, b) => {
+        const timeDiff = (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0);
+        return timeDiff || Number(b.id || 0) - Number(a.id || 0);
+      });
 
       const byDate = new Map();
       products.forEach(product => {
@@ -196,7 +198,7 @@
       });
 
       groups = Array.from(byDate.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
+        .sort((a, b) => b[0].localeCompare(a[0]))
         .map(([key, items]) => ({
           title: dateHeading(key),
           date: key === "undated" ? "" : formatDate(items[0].created_at),
