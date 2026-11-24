@@ -19,8 +19,8 @@ const money=v=>{const n=Number(v);return Number.isFinite(n)?"$"+n.toFixed(2):"Pr
 const refundDisplay=v=>{const days=Number(v??0);if(Number.isFinite(days)&&days>1)return '<span class="status status--ok" title="'+days+' day refund period">✓</span>';if(Number.isFinite(days)&&days===0)return '<span class="status status--failed" title="No refund period">✕</span>';return esc(days)+ (days===1?" day":" days");};
 const monthOrder={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
 const productNameDate=name=>{
- const match=clean(name).match(/^(\\d{1,2})\\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\\b|[-_\\s])/i)
-   ||clean(name).match(/^(\\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\b/i);
+ const match=clean(name).match(/^(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\b|[-_\s])/i)
+   ||clean(name).match(/^(\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i);
  if(!match)return null;
  const day=Number(match[1]),month=monthOrder[match[2].slice(0,3).toLowerCase()];
  return day>=1&&day<=31&&month?month*32+day:null;
