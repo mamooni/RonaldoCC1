@@ -5663,6 +5663,8 @@ button.menu__item {
 .page--expensive .expensive-country { display:inline-flex; align-items:center; gap:7px; min-width:0; color:#2465a8; font-size:12px; font-weight:650; }
 .page--expensive .expensive-country__flag { display:block; flex:0 0 20px; width:20px; height:15px; object-fit:cover; border:1px solid rgba(20,30,45,.14); border-radius:2px; box-shadow:0 1px 2px rgba(0,0,0,.12); }
 .page--expensive .expensive-country__name { min-width:0; overflow-wrap:anywhere; }
+.page--expensive .expensive-id-stack { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; }
+.page--expensive .expensive-id-logo { display:block; width:46px; height:20px; max-width:100%; object-fit:contain; object-position:left center; }
 .page--expensive .expensive-chip--id { color:#596273; background:#f0f2f6; border-color:#e1e5ec; font-variant-numeric:tabular-nums; }
 .page--expensive .expensive-chip--format { color:#176c9c; background:#e8f6fc; border-color:#d1edf8; }
 .page--expensive .expensive-chip--licence { color:#17734a; background:#e8f7ee; border-color:#c6ecd5; }
