@@ -2,6 +2,7 @@
   "use strict";
   const body = document.getElementById("expensiveProducts");
   if (!body) return;
+
   const loading = document.getElementById("expensiveLoading");
   const errorBox = document.getElementById("expensiveError");
   const empty = document.getElementById("expensiveEmpty");
@@ -19,230 +20,252 @@
   const expiry = document.getElementById("expensiveExpiry");
   const format = document.getElementById("expensiveFormat");
   const PER_PAGE = 20;
-  let products = [], visible = [], page = 1, total = 0, requestToken = 0;
+  let products = [], page = 1, visible = [];
+
+  const clean = value => String(value == null ? "" : value).trim();
+  const monthOrder = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+
+  function productNameDate(name) {
+    const value = clean(name);
+    const match = value.match(/^(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\b|[-_\s])/i)
+      || value.match(/^(\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i);
+    if (!match) return null;
+    const day = Number(match[1]);
+    const month = monthOrder[match[2].slice(0, 3).toLowerCase()];
+    return day >= 1 && day <= 31 && month ? month * 32 + day : null;
+  }
+
+  function countryName(code) {
+    const found = (window.NL_COUNTRIES || []).find(item => item.code === clean(code).toUpperCase());
+    return found ? found.name : clean(code);
+  }
+
+  function countryFlag(code) {
+    const value = clean(code).toUpperCase();
+    if (!/^[A-Z]{2}$/.test(value)) return "";
+    return String.fromCodePoint(...Array.from(value, char => 127397 + char.charCodeAt(0)));
+  }
 
   function addCell(row, value, cls) {
-    const td = document.createElement("td");
-    td.textContent = value == null || value === "" ? "—" : String(value);
-    if (cls) td.className = cls;
-    row.appendChild(td);
-    return td;
+    const cell = document.createElement("td");
+    cell.textContent = value == null || value === "" ? "—" : String(value);
+    if (cls) cell.className = cls;
+    row.appendChild(cell);
+    return cell;
   }
+
   function addBadgeCell(row, value, cls) {
-    const td = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = cls;
-    badge.textContent = value == null || value === "" ? "—" : String(value);
-    td.appendChild(badge);
-    row.appendChild(td);
-    return td;
-  }
-  function countryLabel(code) {
-    const found = (window.NL_COUNTRIES || []).find(function (item) { return item.code === code; });
-    return found ? found.name : (code || "—");
-  }
-  function option(select, value, label) {
-    const el = document.createElement("option");
-    el.value = value; el.textContent = label; select.appendChild(el);
-  }
-  function setupFilters(facets) {
-    const keep = { category: category.value, country: country.value, expiry: expiry.value, format: format.value };
-    category.replaceChildren(); option(category, "", "All categories");
-    (facets.categories || []).forEach(v => option(category, v, v));
-    country.replaceChildren(); option(country, "", "All countries");
-    (facets.countries || []).forEach(v => option(country, v, countryLabel(v)));
-    expiry.replaceChildren(); option(expiry, "", "All expiry dates");
-    (facets.expiries || []).forEach(v => option(expiry, v, v));
-    format.replaceChildren(); option(format, "", "All formats");
-    (facets.formats || []).forEach(v => option(format, v.toLowerCase(), v));
-    if ([...category.options].some(o => o.value === keep.category)) category.value = keep.category;
-    if ([...country.options].some(o => o.value === keep.country)) country.value = keep.country;
-    if ([...expiry.options].some(o => o.value === keep.expiry)) expiry.value = keep.expiry;
-    if ([...format.options].some(o => o.value === keep.format)) format.value = keep.format;
-  }
-  function refundStatus(product) {
-    const value = String(product.refund_period == null ? "" : product.refund_period).trim();
-    const match = value.match(/^(\\d+(?:\\.\\d+)?)\\s*(?:days?)?$/i);
-    if (!match) return null;
-    return Number(match[1]) > 0;
-  }
-
-  function productFormats(product) {
-    return String(product.formats || "").split(/[,;|]/).map(function (value) {
-      return value.trim().toLowerCase();
-    }).filter(Boolean);
-  }
-  function dateKey(value) {
-    const raw = String(value || "");
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-    const date = new Date(Number(value) * 1000);
-    if (!Number.isFinite(date.getTime())) return "";
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit"
-    }).format(date);
-  }
-  function dateGroups() {
-    const today = dateKey(Date.now() / 1000);
-    const now = new Date();
-    const weekday = Number(new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Sun" ? 0 : new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Mon" ? 1 : new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Tue" ? 2 : new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Wed" ? 3 : new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Thu" ? 4 : new Intl.DateTimeFormat("en-US", {
-      timeZone: "Africa/Lagos", weekday: "short"
-    }).format(now) === "Fri" ? 5 : 6);
-    const todayDate = new Date(today + "T12:00:00Z");
-    const dayMs = 86400000;
-    const yesterday = new Date(todayDate.getTime() - dayMs).toISOString().slice(0, 10);
-    const weekStart = new Date(todayDate.getTime() - weekday * dayMs);
-    const lastWeekStart = new Date(weekStart.getTime() - 7 * dayMs);
-    const monthStart = today.slice(0, 7) + "-01";
-    const previousMonthDate = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 2, 1));
-    const previousMonth = previousMonthDate.toISOString().slice(0, 7);
-    return { today, yesterday, weekStart: weekStart.toISOString().slice(0, 10),
-      lastWeekStart: lastWeekStart.toISOString().slice(0, 10), monthStart, previousMonth };
-  }
-  function groupFor(product, dates) {
-    const key = dateKey(product.catalogue_date);
-    if (!key) return "Older products";
-    if (key === dates.today) return "Today";
-    if (key === dates.yesterday) return "Yesterday";
-    if (key >= dates.weekStart) return "Earlier this week";
-    if (key >= dates.lastWeekStart) return "Last week";
-    if (key >= dates.monthStart) return "Earlier this month";
-    if (key.slice(0, 7) === dates.previousMonth) return "Last month";
-    return "Older products";
-  }
-  function filterProducts() { page = 1; load(); }
-
-  function button(label, cls, handler) {
-    const b = document.createElement("button"); b.type = "button"; b.className = cls;
-    b.textContent = label; b.addEventListener("click", handler); return b;
-  }
-  function renderRow(p) {
-    const row = document.createElement("tr");
-    addCell(row, p.title, "product-name");
-    addBadgeCell(row, p.category, "expensive-chip expensive-chip--category");
-    const countryCell = document.createElement("td");
-    const countryWrap = document.createElement("span");
-    countryWrap.className = "expensive-country";
-    const countryName = countryLabel(p.country_code);
-    const countryCode = String(p.country_code || "").trim().toLowerCase();
-    if (/^[a-z]{2}$/.test(countryCode)) {
-      const flag = document.createElement("img");
-      flag.className = "expensive-country__flag";
-      flag.src = "https://flagcdn.com/w40/" + countryCode + ".png";
-      flag.alt = countryName + " flag";
-      flag.width = 20;
-      flag.height = 15;
-      flag.loading = "lazy";
-      flag.decoding = "async";
-      flag.addEventListener("error", function () { flag.remove(); }, { once: true });
-      countryWrap.appendChild(flag);
+    const cell = addCell(row, value, cls);
+    if (value != null && value !== "") {
+      const badge = document.createElement("span");
+      badge.className = cls || "";
+      badge.textContent = String(value);
+      cell.textContent = "";
+      cell.appendChild(badge);
     }
-    const countryText = document.createElement("span");
-    countryText.className = "expensive-country__name";
-    countryText.textContent = countryName;
-    countryWrap.appendChild(countryText);
-    countryCell.appendChild(countryWrap);
+    return cell;
+  }
+
+  function addOption(select, value, label) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+
+  function setupFilters() {
+    const keepCountry = country.value;
+    const keepExpiry = expiry.value;
+    const keepFormat = format.value;
+
+    category.replaceChildren();
+    addOption(category, "", "All categories");
+
+    country.replaceChildren();
+    addOption(country, "", "All countries");
+    [...new Set(products.map(product => clean(product.intended_country).toUpperCase()).filter(Boolean))]
+      .sort()
+      .forEach(code => addOption(country, code, countryName(code)));
+
+    expiry.replaceChildren();
+    addOption(expiry, "", "All expiry dates");
+    [...new Set(products.map(product => clean(product.expiry)).filter(Boolean))]
+      .sort()
+      .forEach(value => addOption(expiry, value, value));
+
+    format.replaceChildren();
+    addOption(format, "", "All formats");
+    [...new Set(products.map(product => clean(product.format)).filter(Boolean))]
+      .sort()
+      .forEach(value => addOption(format, value.toLowerCase(), value));
+
+    if ([...country.options].some(option => option.value === keepCountry)) country.value = keepCountry;
+    if ([...expiry.options].some(option => option.value === keepExpiry)) expiry.value = keepExpiry;
+    if ([...format.options].some(option => option.value === keepFormat)) format.value = keepFormat;
+  }
+
+  function sortByProductDate(list) {
+    list.sort((a, b) => {
+      const dateA = productNameDate(a.name);
+      const dateB = productNameDate(b.name);
+      if (dateA !== null && dateB !== null && dateA !== dateB) return dateB - dateA;
+      if (dateA !== null && dateB === null) return -1;
+      if (dateB !== null && dateA === null) return 1;
+      const createdA = Date.parse(a.created_at || "") || 0;
+      const createdB = Date.parse(b.created_at || "") || 0;
+      return createdB - createdA || Number(b.id || 0) - Number(a.id || 0);
+    });
+    return list;
+  }
+
+  function filteredProducts() {
+    const query = clean(search.value).toLowerCase();
+    const selectedCountry = country.value;
+    const selectedFormat = format.value;
+    const selectedExpiry = expiry.value;
+    const min = minPrice.value.trim() === "" ? null : Number(minPrice.value);
+    const max = maxPrice.value.trim() === "" ? null : Number(maxPrice.value);
+
+    let list = products.filter(product => {
+      const searchable = [product.name, product.seller, product.product_code].map(value => clean(value).toLowerCase()).join(" ");
+      const price = Number(product.price);
+      const refundDays = Number(product.refund_period || 0);
+      return (!query || searchable.includes(query))
+        && (!selectedCountry || clean(product.intended_country).toUpperCase() === selectedCountry)
+        && (!selectedFormat || clean(product.format).toLowerCase() === selectedFormat)
+        && (!selectedExpiry || clean(product.expiry) === selectedExpiry)
+        && (min === null || (Number.isFinite(price) && price >= min))
+        && (max === null || (Number.isFinite(price) && price <= max))
+        && (!refund.value || (refund.value === "yes" ? refundDays > 0 : refundDays <= 0));
+    });
+
+    if (sort.value === "low-high") list.sort((a, b) => Number(a.price) - Number(b.price));
+    else if (sort.value === "high-low") list.sort((a, b) => Number(b.price) - Number(a.price));
+    else sortByProductDate(list);
+
+    return list;
+  }
+
+  function renderRow(product) {
+    const row = document.createElement("tr");
+    addCell(row, product.name, "product-name");
+    addCell(row, product.seller);
+    const countryCell = document.createElement("td");
+    const flag = countryFlag(product.intended_country);
+    if (flag) {
+      const flagSpan = document.createElement("span");
+      flagSpan.className = "country-flag";
+      flagSpan.setAttribute("aria-hidden", "true");
+      flagSpan.textContent = flag;
+      countryCell.appendChild(flagSpan);
+      countryCell.appendChild(document.createTextNode(" "));
+    }
+    countryCell.appendChild(document.createTextNode([product.market, product.state].filter(Boolean).join(", ") || countryName(product.intended_country) || "—"));
     row.appendChild(countryCell);
-    addBadgeCell(row, p.product_id, "expensive-chip expensive-chip--id");
-    addBadgeCell(row, p.formats, "expensive-chip expensive-chip--format");
-    addBadgeCell(row, p.license, "expensive-chip expensive-chip--licence");
-    addBadgeCell(row, p.expDate, "expensive-chip expensive-chip--expiry");
+    addBadgeCell(row, product.product_code, "expensive-chip expensive-chip--id");
+    addBadgeCell(row, product.format, "expensive-chip expensive-chip--format");
+    addCell(row, product.quality || "Very High");
+    addBadgeCell(row, product.expiry, "expensive-chip expensive-chip--expiry");
+
     const refundCell = document.createElement("td");
+    const refundDays = Number(product.refund_period || 0);
     const refundBadge = document.createElement("span");
-    const refundText = String(p.refund_period == null ? "" : p.refund_period).trim();
-    const refundMatch = refundText.match(/^(\d+(?:\.\d+)?)\s*(?:days?)?$/i);
-    if (refundMatch) {
-      const refundDays = Number(refundMatch[1]);
-      if (refundDays > 0) {
-        refundBadge.className = "expensive-refund expensive-refund--yes";
-        refundBadge.textContent = "✓ Refundable";
-        refundBadge.setAttribute("aria-label", "Refundable for " + refundDays + " days");
-      } else {
-        refundBadge.className = "expensive-refund expensive-refund--no";
-        refundBadge.textContent = "✕ Not refundable";
-        refundBadge.setAttribute("aria-label", "Not refundable");
-      }
+    if (refundDays > 0) {
+      refundBadge.className = "expensive-refund expensive-refund--yes";
+      refundBadge.textContent = refundDays + (refundDays === 1 ? " day" : " days");
     } else {
-      refundBadge.className = "expensive-refund expensive-refund--unknown";
-      refundBadge.textContent = "Not specified";
-      refundBadge.setAttribute("aria-label", "Refund period not specified");
+      refundBadge.className = "expensive-refund expensive-refund--no";
+      refundBadge.textContent = "Not refundable";
     }
     refundCell.appendChild(refundBadge);
     row.appendChild(refundCell);
-    const price = Number(p.price);
+
+    const price = Number(product.price);
     addCell(row, Number.isFinite(price) ? "$" + price.toFixed(2) : "—", "expensive-price is-numeric");
-    const actions = document.createElement("td"); actions.className = "is-numeric";
-    const actionGroup = document.createElement("div"); actionGroup.className = "expensive-actions";
-    actionGroup.appendChild(button("Buy", "btn btn--primary", function () {
-      window.location.href = "checkout.html?product=" + encodeURIComponent(p.id);
+
+    const actions = document.createElement("td");
+    actions.className = "is-numeric";
+    const actionGroup = document.createElement("div");
+    actionGroup.className = "expensive-actions";
+
+    actionGroup.appendChild(makeButton("Buy", "btn btn--primary", function () {
+      if (!product.id) return;
+      window.location.href = "legitimate-checkout.html?product=" + encodeURIComponent(product.id);
     }));
-    actionGroup.appendChild(button("Add", "btn btn--wallet", function (event) {
-      if (!window.NLExpensiveCart) { window.alert("Cart unavailable. Please refresh the page."); return; }
-      try {
-        window.NLExpensiveCart.add({ id: p.id, title: p.title });
-        event.currentTarget.textContent = "Added"; event.currentTarget.disabled = true;
-      } catch (err) { window.alert(err.message || "Could not add this product."); }
+
+    actionGroup.appendChild(makeButton("Add", "btn btn--wallet", function (event) {
+      if (!window.NLLegitCart) {
+        window.alert("Cart unavailable. Please refresh the page.");
+        return;
+      }
+      window.NLLegitCart.add({ key: String(product.id), title: product.name, price: product.price });
+      event.currentTarget.textContent = "Added";
+      event.currentTarget.disabled = true;
     }));
+
     actions.appendChild(actionGroup);
-    row.appendChild(actions); return row;
+    row.appendChild(actions);
+    return row;
   }
+
+  function makeButton(label, className, handler) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener("click", handler);
+    return button;
+  }
+
   function render() {
-    body.replaceChildren();
-    // The API returns products in CSV row order for the default sort.
-    // Render that sequence directly; date grouping would rearrange the CSV order.
-    visible.forEach(function (product) { body.appendChild(renderRow(product)); });
+    const list = filteredProducts();
+    const total = list.length;
     const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+    page = Math.min(page, pages);
+    visible = list.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+    body.replaceChildren();
+    visible.forEach(product => body.appendChild(renderRow(product)));
+
     empty.hidden = total > 0;
     pagination.hidden = total <= PER_PAGE;
     pageInfo.textContent = "Page " + page + " of " + pages + " · " + total + " products";
-    prev.disabled = page === 1; next.disabled = page >= pages;
+    prev.disabled = page === 1;
+    next.disabled = page >= pages;
   }
+
   async function load() {
-    const token = ++requestToken;
-    loading.hidden = false; errorBox.hidden = true; empty.hidden = true;
-    const params = new URLSearchParams({
-      page: String(page), per_page: String(PER_PAGE), q: search.value.trim(),
-      category: category.value, country: country.value, sort: sort.value,
-      min: minPrice.value.trim(), max: maxPrice.value.trim(), refund: refund.value,
-      expiry: expiry.value, format: format.value
-    });
+    loading.hidden = false;
+    errorBox.hidden = true;
+    empty.hidden = true;
     try {
-      const response = await fetch("/api/expensive-products?" + params.toString(), { headers: { Accept: "application/json" } });
+      const response = await fetch("/api/legitimate-products", {
+        headers: { Accept: "application/json" }
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load products.");
-      if (token !== requestToken) return;
-      products = Array.isArray(data.products) ? data.products : [];
-      total = Number(data.total) || 0;
-      visible = products.slice();
-      setupFilters(data.facets || {});
+      products = (Array.isArray(data.products) ? data.products : [])
+        .filter(product => product && product.status !== "draft");
+      setupFilters();
       loading.hidden = true;
       render();
-    } catch (err) {
-      if (token !== requestToken) return;
-      loading.hidden = true; errorBox.textContent = err.message || "Could not load products."; errorBox.hidden = false;
+    } catch (error) {
+      loading.hidden = true;
+      errorBox.textContent = error.message || "Could not load legitimate products.";
+      errorBox.hidden = false;
     }
   }
+
   let filterTimer;
-  function queueFilter() { window.clearTimeout(filterTimer); filterTimer = window.setTimeout(filterProducts, 250); }
-  search.addEventListener("input", queueFilter);
-  minPrice.addEventListener("input", queueFilter);
-  maxPrice.addEventListener("input", queueFilter);
-  category.addEventListener("change", filterProducts);
-  country.addEventListener("change", filterProducts);
-  sort.addEventListener("change", filterProducts);
-  refund.addEventListener("change", filterProducts);
-  expiry.addEventListener("change", filterProducts);
-  format.addEventListener("change", filterProducts);
-  prev.addEventListener("click", function () { if (page > 1) { page--; load(); } });
-  next.addEventListener("click", function () { if (page < Math.ceil(total / PER_PAGE)) { page++; load(); } });
+  function queueRender() {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(function () { page = 1; render(); }, 200);
+  }
+
+  [search, minPrice, maxPrice].forEach(input => input.addEventListener("input", queueRender));
+  [category, country, sort, refund, expiry, format].forEach(select => select.addEventListener("change", function () { page = 1; render(); }));
+  prev.addEventListener("click", function () { if (page > 1) { page--; render(); } });
+  next.addEventListener("click", function () { page++; render(); });
+
   load();
 })();
