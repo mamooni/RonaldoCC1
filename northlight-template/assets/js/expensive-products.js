@@ -260,19 +260,52 @@
     errorBox.hidden = true;
     empty.hidden = true;
     try {
-      const response = await fetch("/api/legitimate-products", {
+      const perPage = 100;
+      const firstResponse = await fetch("/api/expensive-products?page=1&per_page=" + perPage, {
         headers: { Accept: "application/json" }
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not load products.");
-      products = (Array.isArray(data.products) ? data.products : [])
-        .filter(product => product && product.status !== "draft");
+      const firstData = await firstResponse.json();
+      if (!firstResponse.ok) throw new Error(firstData.error || "Could not load expensive products.");
+
+      const rawProducts = Array.isArray(firstData.products) ? firstData.products.slice() : [];
+      const total = Number(firstData.total || rawProducts.length);
+      const pageCount = Math.ceil(total / perPage);
+
+      for (let currentPage = 2; currentPage <= pageCount; currentPage++) {
+        const response = await fetch("/api/expensive-products?page=" + currentPage + "&per_page=" + perPage, {
+          headers: { Accept: "application/json" }
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load expensive products.");
+        if (Array.isArray(data.products)) rawProducts.push(...data.products);
+      }
+
+      products = rawProducts.map(product => {
+        const formats = clean(product.formats);
+        const created = Number(product.created_at);
+        return {
+          ...product,
+          name: product.title || "",
+          seller: product.creator || "",
+          product_code: product.product_id || "",
+          intended_country: product.country_code || "",
+          market: countryName(product.country_code || ""),
+          state: "",
+          format: formats.split(/[,;|]/).map(value => value.trim()).filter(Boolean).join(", "),
+          expiry: product.expDate || "",
+          quality: product.license || "",
+          created_at: Number.isFinite(created) && created > 0
+            ? new Date(created * 1000).toISOString()
+            : (product.created_at || "")
+        };
+      });
+
       setupFilters();
       loading.hidden = true;
       render();
     } catch (error) {
       loading.hidden = true;
-      errorBox.textContent = error.message || "Could not load legitimate products.";
+      errorBox.textContent = error.message || "Could not load expensive products.";
       errorBox.hidden = false;
     }
   }
