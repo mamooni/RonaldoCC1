@@ -165,7 +165,7 @@
     const actionCell = make("td");
     actionCell.colSpan = 2;
     const isExpensive = product.catalogueType === "expensive";
-    const view = make("a", "btn btn--primary", isExpensive ? "View expensive" : "View Goods");
+    const view = make("a", "btn btn--primary", isExpensive ? "View enroll" : "View Goods");
     view.href = isExpensive ? "expensive.html" : "search.html";
     actionCell.appendChild(view);
     actionRow.appendChild(actionCell);
