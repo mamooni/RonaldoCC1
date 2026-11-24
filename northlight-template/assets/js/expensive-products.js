@@ -55,14 +55,16 @@
   }
 
   function addBadgeCell(row, value, cls) {
-    const cell = addCell(row, value, cls);
-    if (value != null && value !== "") {
+    const cell = document.createElement("td");
+    if (value == null || value === "") {
+      cell.textContent = "—";
+    } else {
       const badge = document.createElement("span");
       badge.className = cls || "";
       badge.textContent = String(value);
-      cell.textContent = "";
       cell.appendChild(badge);
     }
+    row.appendChild(cell);
     return cell;
   }
 
