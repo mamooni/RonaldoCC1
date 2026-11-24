@@ -41,7 +41,7 @@
       } else if (response.status === 404) {
         show("Product unavailable", "error");
         var explanation = document.createElement("p");
-        explanation.textContent = "We couldn't find that ID in the current catalogue. Check the ID and try again.";
+        explanation.textContent = "We couldn't find this BIN in the current catalogue. Check the BIN and try again.";
         result.appendChild(explanation);
       } else {
         show(data.error || "We couldn't verify this product right now. Please try again.", "error");
