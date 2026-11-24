@@ -17,13 +17,21 @@ const countryFlag=v=>{
 };
 const money=v=>{const n=Number(v);return Number.isFinite(n)?"$"+n.toFixed(2):"Price on request";};
 const refundDisplay=v=>{const days=Number(v??0);if(Number.isFinite(days)&&days>1)return '<span class="status status--ok" title="'+days+' day refund period">✓</span>';if(Number.isFinite(days)&&days===0)return '<span class="status status--failed" title="No refund period">✕</span>';return esc(days)+ (days===1?" day":" days");};
+const monthOrder={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+const productNameDate=name=>{
+ const match=clean(name).match(/^(\\d{1,2})\\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\\b|[-_\\s])/i)
+   ||clean(name).match(/^(\\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\b/i);
+ if(!match)return null;
+ const day=Number(match[1]),month=monthOrder[match[2].slice(0,3).toLowerCase()];
+ return day>=1&&day<=31&&month?month*32+day:null;
+};
 function filteredProducts(){
  const q=clean(els.query.value).toLowerCase(),format=els.format.value;
  const list=products.filter(p=>{
   const searchable=clean(p.name).toLowerCase();
   return (!q||searchable.includes(q))&&(!format||clean(p.format).toLowerCase()===format);
  });
- list.sort((a,b)=>{const dateB=Date.parse(b.created_at||"")||0,dateA=Date.parse(a.created_at||"")||0;return dateB-dateA||Number(b.id||0)-Number(a.id||0);});
+ list.sort((a,b)=>{const nameDateA=productNameDate(a.name),nameDateB=productNameDate(b.name);if(nameDateA!==null&&nameDateB!==null&&nameDateA!==nameDateB)return nameDateB-nameDateA;if(nameDateA!==null&&nameDateB===null)return -1;if(nameDateB!==null&&nameDateA===null)return 1;const dateB=Date.parse(b.created_at||"")||0,dateA=Date.parse(a.created_at||"")||0;return dateB-dateA||Number(b.id||0)-Number(a.id||0);});
  return list;
 }
 function render(){
