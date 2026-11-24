@@ -5617,7 +5617,7 @@ button.menu__item {
   border:0; border-radius:0; border-top:1px solid var(--border-soft);
 }
 .page--expensive .expensive-table {
-  min-width:1450px; font-size:11.5px; color:var(--text-dim);
+  width:1450px; min-width:1450px; table-layout:fixed; font-size:11.5px; color:var(--text-dim);
 }
 .page--expensive .expensive-table th {
   padding:10px 8px; color:var(--text-mute); font-size:11.5px;
