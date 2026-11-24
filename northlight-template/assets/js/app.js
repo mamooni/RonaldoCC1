@@ -1,6 +1,5 @@
-/* Northlight homepage legitimate-goods accordion.
-   Keeps the original expandable feed presentation; all listing data comes
-   from the public legitimate catalogue API. */
+/* Northlight homepage combined product accordion.
+   Legitimate and expensive catalogue products share one newest-first feed. */
 (() => {
   "use strict";
 
@@ -9,14 +8,17 @@
   const loadMore = document.getElementById("loadMore");
   if (!feed || !count || !loadMore) return;
 
-  const API = "/api/legitimate-products";
+  const LEGITIMATE_API = "/api/legitimate-products";
+  const EXPENSIVE_API = "/api/expensive-products";
   const PAGE_DAYS = 3;
   let groups = [];
   let visibleGroups = 0;
   let rendered = 0;
+  let loadWarning = "";
 
   const clean = value => String(value ?? "").trim();
   const monthOrder = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
   function productNameDate(name) {
     const value = clean(name);
     const match = value.match(/^(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\b|[-_\s])/i)
@@ -24,19 +26,25 @@
     if (!match) return null;
     const day = Number(match[1]);
     const month = monthOrder[match[2].slice(0, 3).toLowerCase()];
-    return day >= 1 && day <= 31 && month ? { rank: month * 32 + day, label: day + " " + match[2].slice(0, 3) } : null;
+    return day >= 1 && day <= 31 && month
+      ? { rank: month * 32 + day, label: day + " " + match[2].slice(0, 3) }
+      : null;
   }
+
   const money = value => {
     const amount = Number(value);
     return Number.isFinite(amount) ? "$" + amount.toFixed(2) : "Price on request";
   };
-  const refundText = value => {
-    const days = Number(value ?? 0);
-    if (days > 1) return days + " days";
-    if (days === 1) return "1 day";
-    if (days === 0) return "No refund period";
-    return "Not specified";
-  };
+
+  function isRefundable(value) {
+    if (typeof value === "number" || /^\s*\d+(?:\.\d+)?\s*$/.test(String(value ?? ""))) {
+      return Number(value) > 0;
+    }
+    const text = clean(value).toLowerCase();
+    if (!text || /\b(no|not|non|without|none)\b/.test(text)) return false;
+    return /\b(yes|refundable|\d+\s*(day|days|week|weeks|month|months))\b/.test(text);
+  }
+
   const make = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -87,6 +95,23 @@
     }).format(date);
   }
 
+  function countryName(code) {
+    const value = clean(code).toUpperCase();
+    if (!/^[A-Z]{2}$/.test(value)) return clean(code) || "Not specified";
+    try {
+      return new Intl.DisplayNames(["en"], { type: "region" }).of(value) || value;
+    } catch (_) {
+      return value;
+    }
+  }
+
+  function countryFlag(code) {
+    const value = clean(code).toUpperCase();
+    return /^[A-Z]{2}$/.test(value)
+      ? String.fromCodePoint(...Array.from(value, char => 127397 + char.charCodeAt(0)))
+      : "";
+  }
+
   function buildDrop(product, index) {
     const article = make("article", "drop");
     article.dataset.index = String(index);
@@ -99,6 +124,7 @@
     head.id = headId;
     head.setAttribute("aria-expanded", "false");
     head.setAttribute("aria-controls", panelId);
+
     const heading = make("span", "drop__heading");
     heading.appendChild(make("span", "drop__title", clean(product.name) || "Untitled product"));
 
@@ -123,22 +149,24 @@
     const body = make("tbody");
 
     const countryCode = clean(product.intended_country).toUpperCase();
-    const countryFlag = /^[A-Z]{2}$/.test(countryCode)
-      ? String.fromCodePoint(...[...countryCode].map(char => 127397 + char.charCodeAt(0)))
-      : "";
-    body.appendChild(specRow(
-      "Country",
-      (countryFlag ? countryFlag + "  " : "") + (clean(product.market) || "Not specified")
-    ));
+    const flag = countryFlag(countryCode);
+    const country = clean(product.market) || countryName(countryCode);
+    body.appendChild(specRow("Country", (flag ? flag + "  " : "") + country));
     body.appendChild(specRow("Description", clean(product.description) || "No description provided."));
-    const refundable = Number(product.refund_period ?? 0) > 0;
-    body.appendChild(specRow("Refundable", refundable ? "Yes" : "No", refundable ? "specs__val--yes" : "specs__val--no"));
+
+    const refundable = isRefundable(product.refund_period);
+    body.appendChild(specRow(
+      "Refundable",
+      refundable ? "Yes" : "No",
+      refundable ? "specs__val--yes" : "specs__val--no"
+    ));
 
     const actionRow = make("tr", "specs__actionRow");
     const actionCell = make("td");
     actionCell.colSpan = 2;
-    const view = make("a", "btn btn--primary", "View Goods");
-    view.href = "search.html";
+    const isExpensive = product.catalogueType === "expensive";
+    const view = make("a", "btn btn--primary", isExpensive ? "View expensive" : "View Goods");
+    view.href = isExpensive ? "expensive.html" : "search.html";
     actionCell.appendChild(view);
     actionRow.appendChild(actionCell);
     body.appendChild(actionRow);
@@ -158,7 +186,8 @@
   }
 
   function updateChrome() {
-    count.textContent = "Showing " + rendered + " of " + groups.reduce((sum, group) => sum + group.products.length, 0) + " goods";
+    const total = groups.reduce((sum, group) => sum + group.products.length, 0);
+    count.textContent = "Showing " + rendered + " of " + total + " goods" + (loadWarning ? " · " + loadWarning : "");
     const done = visibleGroups >= groups.length;
     loadMore.hidden = done;
     if (done && groups.length) loadMore.textContent = "All goods loaded";
@@ -184,60 +213,115 @@
 
   loadMore.addEventListener("click", renderNext);
 
+  async function fetchJson(url) {
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Catalogue request failed");
+    return payload;
+  }
+
+  async function fetchExpensiveProducts() {
+    const pageSize = 100;
+    const first = await fetchJson(EXPENSIVE_API + "?page=1&per_page=" + pageSize);
+    const firstProducts = Array.isArray(first.products) ? first.products : [];
+    const total = Number(first.total) || firstProducts.length;
+    const pageCount = Math.ceil(total / pageSize);
+    const remaining = await Promise.all(
+      Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
+        fetchJson(EXPENSIVE_API + "?page=" + (index + 2) + "&per_page=" + pageSize)
+      )
+    );
+    const all = firstProducts.concat(...remaining.map(result => Array.isArray(result.products) ? result.products : []));
+    return all.map(product => {
+      const timestamp = Number(product.created_at);
+      const createdAt = Number.isFinite(timestamp) && timestamp > 0
+        ? new Date(timestamp * 1000).toISOString()
+        : product.created_at;
+      return {
+        ...product,
+        name: product.title,
+        seller: product.creator,
+        description: product.blurb,
+        intended_country: product.country_code,
+        market: countryName(product.country_code),
+        created_at: createdAt,
+        catalogueType: "expensive"
+      };
+    });
+  }
+
   async function loadProducts() {
     count.textContent = "Loading goods…";
     loadMore.hidden = true;
-    try {
-      const response = await fetch(API, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw new Error("Catalogue request failed");
-      const payload = await response.json();
-      const products = (Array.isArray(payload) ? payload : payload.products || [])
-        .filter(product => product && product.status !== "draft");
 
-      // Product-name date prefixes (e.g. 24Nov, 23Nov) are authoritative
-      // for homepage grouping, matching the Legitimate Goods catalogue.
-      products.sort((a, b) => {
-        const nameDateA = productNameDate(a.name);
-        const nameDateB = productNameDate(b.name);
-        if (nameDateA && nameDateB && nameDateA.rank !== nameDateB.rank) return nameDateB.rank - nameDateA.rank;
-        if (nameDateA && !nameDateB) return -1;
-        if (nameDateB && !nameDateA) return 1;
-        const timeDiff = (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0);
-        return timeDiff || Number(b.id || 0) - Number(a.id || 0);
-      });
+    const results = await Promise.allSettled([
+      fetchJson(LEGITIMATE_API),
+      fetchExpensiveProducts()
+    ]);
 
-      const byDate = new Map();
-      products.forEach(product => {
-        const namedDate = productNameDate(product.name);
-        const key = namedDate ? "named-" + namedDate.rank : "created-" + dateKey(product.created_at);
-        if (!byDate.has(key)) byDate.set(key, { title: namedDate ? namedDate.label : dateHeading(dateKey(product.created_at)), date: namedDate ? "" : (dateKey(product.created_at) === "undated" ? "" : formatDate(product.created_at)), products: [] });
-        byDate.get(key).products.push(product);
-      });
+    const legitimateResult = results[0];
+    const expensiveResult = results[1];
+    const legitimate = legitimateResult.status === "fulfilled"
+      ? (Array.isArray(legitimateResult.value.products) ? legitimateResult.value.products : [])
+          .filter(product => product && product.status !== "draft")
+          .map(product => ({ ...product, catalogueType: "legitimate" }))
+      : [];
+    const expensive = expensiveResult.status === "fulfilled" ? expensiveResult.value : [];
 
-      groups = Array.from(byDate.entries())
-        .sort((a, b) => {
-          const aNamed = a[0].startsWith("named-");
-          const bNamed = b[0].startsWith("named-");
-          if (aNamed && bNamed) return Number(b[0].slice(6)) - Number(a[0].slice(6));
-          if (aNamed) return -1;
-          if (bNamed) return 1;
-          return b[0].slice(8).localeCompare(a[0].slice(8));
-        })
-        .map(([, group]) => group);
-
-      feed.replaceChildren();
-      if (!groups.length) {
-        feed.appendChild(make("p", "catalogue__empty", "No legitimate goods have been published yet."));
-        count.textContent = "0 goods";
-        return;
-      }
-      visibleGroups = 0;
-      rendered = 0;
-      renderNext();
-    } catch (error) {
-      feed.replaceChildren(make("p", "catalogue__empty", "The legitimate goods feed is temporarily unavailable."));
+    if (legitimateResult.status === "rejected" && expensiveResult.status === "rejected") {
+      feed.replaceChildren(make("p", "catalogue__empty", "The goods feed is temporarily unavailable."));
       count.textContent = "Unable to load goods";
+      return;
     }
+
+    if (legitimateResult.status === "rejected") loadWarning = "Legitimate catalogue unavailable";
+    else if (expensiveResult.status === "rejected") loadWarning = "Expensive catalogue unavailable";
+
+    const products = legitimate.concat(expensive);
+    products.sort((a, b) => {
+      const nameDateA = productNameDate(a.name);
+      const nameDateB = productNameDate(b.name);
+      if (nameDateA && nameDateB && nameDateA.rank !== nameDateB.rank) return nameDateB.rank - nameDateA.rank;
+      if (nameDateA && !nameDateB) return -1;
+      if (nameDateB && !nameDateA) return 1;
+      const timeDiff = (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0);
+      return timeDiff || Number(b.id || 0) - Number(a.id || 0);
+    });
+
+    const byDate = new Map();
+    products.forEach(product => {
+      const namedDate = productNameDate(product.name);
+      const key = namedDate ? "named-" + namedDate.rank : "created-" + dateKey(product.created_at);
+      if (!byDate.has(key)) {
+        byDate.set(key, {
+          title: namedDate ? namedDate.label : dateHeading(dateKey(product.created_at)),
+          date: namedDate ? "" : (dateKey(product.created_at) === "undated" ? "" : formatDate(product.created_at)),
+          products: []
+        });
+      }
+      byDate.get(key).products.push(product);
+    });
+
+    groups = Array.from(byDate.entries())
+      .sort((a, b) => {
+        const aNamed = a[0].startsWith("named-");
+        const bNamed = b[0].startsWith("named-");
+        if (aNamed && bNamed) return Number(b[0].slice(6)) - Number(a[0].slice(6));
+        if (aNamed) return -1;
+        if (bNamed) return 1;
+        return b[0].slice(8).localeCompare(a[0].slice(8));
+      })
+      .map(([, group]) => group);
+
+    feed.replaceChildren();
+    if (!groups.length) {
+      feed.appendChild(make("p", "catalogue__empty", "No products have been published yet."));
+      count.textContent = "0 goods" + (loadWarning ? " · " + loadWarning : "");
+      return;
+    }
+    visibleGroups = 0;
+    rendered = 0;
+    renderNext();
   }
 
   loadProducts();
