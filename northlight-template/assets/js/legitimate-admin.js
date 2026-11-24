@@ -4,13 +4,35 @@ const API="/api/admin/legitimate-products", byId=id=>document.getElementById(id)
 const form=byId("productForm"),list=byId("productList"),message=byId("lpMessage");let products=[];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const countryCodes={"United States":"US","United Kingdom":"GB","Canada":"CA","Australia":"AU","Germany":"DE","France":"FR","India":"IN"};
+const countryEntries=Object.entries(countryCodes);
+const countryByCode=Object.fromEntries(countryEntries.map(([name,code])=>[code,name]));
+const normalizeCountry=value=>String(value||"").trim().toLowerCase();
+function countryCodeFor(value){const v=normalizeCountry(value);const match=countryEntries.find(([name,code])=>normalizeCountry(name)===v||code.toLowerCase()===v);return match?match[1]:"";}
+function countryNameFor(value){const v=String(value||"").trim().toUpperCase();return countryByCode[v]||countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(value))?.[0]||"";}
+function setupCountryAutocomplete(){
+ const market=byId("market"),code=byId("intendedCountry");
+ const marketList=byId("marketCountryOptions")||document.createElement("datalist");
+ marketList.id="marketCountryOptions";
+ marketList.innerHTML=countryEntries.map(([name,countryCode])=>'<option value="'+esc(name)+'" label="'+countryCode+'"></option>').join("");
+ if(!marketList.parentNode)document.body.appendChild(marketList);
+ market.setAttribute("list",marketList.id);
+ const codeList=byId("countryCodeOptions")||document.createElement("datalist");
+ codeList.id="countryCodeOptions";
+ codeList.innerHTML=countryEntries.map(([name,countryCode])=>'<option value="'+countryCode+'" label="'+esc(name)+'"></option>').join("");
+ if(!codeList.parentNode)document.body.appendChild(codeList);
+ code.setAttribute("list",codeList.id);
+ market.addEventListener("input",()=>{const match=countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(market.value));if(match)code.value=match[1];});
+ market.addEventListener("change",()=>{const match=countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(market.value));if(match)code.value=match[1];});
+ code.addEventListener("input",()=>{const name=countryNameFor(code.value);if(name)market.value=name;});
+ code.addEventListener("change",()=>{const name=countryNameFor(code.value);if(name){market.value=name;code.value=countryCodeFor(name);}});
+}
 async function request(url,options={}){const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Accept":"application/json",...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||("Request failed ("+response.status+")"));return data;}
 function clearForm(){form.reset();byId("productId").value="";byId("quality").value="Very High";byId("description").value="Good";byId("formHeading").textContent="Add a product";}
-function editProduct(id){const p=products.find(x=>Number(x.id)===Number(id));if(!p)return;byId("productId").value=p.id;byId("name").value=p.name;byId("market").value=p.market||"";byId("state").value=p.state||"";byId("format").value=p.format||"digital";byId("price").value=p.price;byId("seller").value=p.seller||"";byId("quality").value="Very High";byId("productCode").value=p.product_code||"";byId("expiry").value=p.expiry||"";byId("intendedCountry").value=p.intended_country||"";byId("refundPeriod").value=String(p.refund_period??0);byId("status").value=p.status;byId("description").value=p.description||"Good";byId("formHeading").textContent="Edit product #"+p.product_code;window.scrollTo({top:0,behavior:"smooth"});}
+function editProduct(id){const p=products.find(x=>Number(x.id)===Number(id));if(!p)return;byId("productId").value=p.id;byId("name").value=p.name;byId("market").value=p.market||"";byId("state").value=p.state||"";byId("format").value=p.format||"digital";byId("price").value=p.price;byId("seller").value=p.seller||"";byId("quality").value="Very High";byId("productCode").value=p.product_code||"";byId("expiry").value=p.expiry||"";byId("intendedCountry").value=p.intended_country||countryCodeFor(p.market)||"";byId("refundPeriod").value=String(p.refund_period??0);byId("status").value=p.status;byId("description").value=p.description||"Good";byId("formHeading").textContent="Edit product #"+p.product_code;window.scrollTo({top:0,behavior:"smooth"});}
 function render(){if(!products.length){list.textContent="No products have been added.";return;}list.innerHTML=products.map(p=>'<article class="lp-item"><div><strong>'+esc(p.name)+'</strong><p>'+esc(p.seller)+' · '+esc(p.quality)+' · '+esc(p.product_code)+' · '+esc(p.market)+', '+esc(p.state)+' · $'+Number(p.price).toFixed(2)+'</p><span class="lp-status">'+esc(p.status)+'</span></div><div class="lp-actions"><button class="lp-button secondary" type="button" data-edit="'+Number(p.id)+'">Edit</button><button class="lp-button secondary" type="button" data-delete="'+Number(p.id)+'">Delete</button></div></article>').join("");}
 async function load(){try{const data=await request(API);products=Array.isArray(data.products)?data.products:[];render();}catch(error){list.textContent=error.message;}}
-function currentProduct(){return {id:byId("productId").value||null,name:byId("name").value,market:byId("market").value,state:byId("state").value,format:byId("format").value,seller:byId("seller").value,quality:"Very High",price:byId("price").value,product_code:byId("productCode").value,expiry:byId("expiry").value,status:byId("status").value,intended_country:byId("intendedCountry").value,refund_period:byId("refundPeriod").value,description:byId("description").value};}
-form.addEventListener("submit",async event=>{event.preventDefault();message.textContent="Saving…";const product=currentProduct();const expected=countryCodes[product.market];if(!expected||expected!==product.intended_country.toUpperCase()){message.textContent="Intended country code must match the Market.";return;}try{await request(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"save",product})});message.textContent="Product saved.";clearForm();await load();}catch(error){message.textContent=error.message;}});
+function currentProduct(){return {id:byId("productId").value||null,name:byId("name").value,market:byId("market").value,state:byId("state").value,format:byId("format").value,seller:byId("seller").value,quality:"Very High",price:byId("price").value,product_code:byId("productCode").value,expiry:byId("expiry").value,status:byId("status").value,intended_country:countryCodeFor(byId("market").value)||countryCodeFor(byId("intendedCountry").value),refund_period:byId("refundPeriod").value,description:byId("description").value};}
+form.addEventListener("submit",async event=>{event.preventDefault();message.textContent="Saving…";const product=currentProduct();const expected=countryCodeFor(product.market);if(!expected){message.textContent="Choose a supported country from the Market suggestions.";return;}product.intended_country=expected;try{await request(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"save",product})});message.textContent="Product saved.";clearForm();await load();}catch(error){message.textContent=error.message;}});
 byId("resetForm").addEventListener("click",()=>{clearForm();message.textContent="";});
 list.addEventListener("click",async event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit){editProduct(edit.dataset.edit);return;}if(del&&window.confirm("Delete this product permanently?")){try{await request(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",id:del.dataset.delete})});message.textContent="Product deleted.";await load();}catch(error){message.textContent=error.message;}}});
 
@@ -81,5 +103,6 @@ importButton.addEventListener("click",async()=>{
   csvRows=[];csvFile.value="";importButton.disabled=true;await load();
  }catch(error){csvMessage.textContent=error.message;importButton.disabled=false;}finally{previewButton.disabled=false;}
 });
+setupCountryAutocomplete();
 load();
 })();
