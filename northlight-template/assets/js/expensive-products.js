@@ -164,7 +164,26 @@
     }
     countryCell.appendChild(document.createTextNode([product.market, product.state].filter(Boolean).join(", ") || countryName(product.intended_country) || "—"));
     row.appendChild(countryCell);
-    addBadgeCell(row, product.product_code, "expensive-chip expensive-chip--id");
+    const idCell = document.createElement("td");
+    const idStack = document.createElement("div");
+    idStack.className = "expensive-id-stack";
+    const idBadge = document.createElement("span");
+    idBadge.className = "expensive-chip expensive-chip--id";
+    idBadge.textContent = product.product_code == null || product.product_code === "" ? "—" : String(product.product_code);
+    idStack.appendChild(idBadge);
+    const idPrefix = String(product.product_code || "").trim().charAt(0);
+    if (["3", "4", "5"].includes(idPrefix)) {
+      const logo = document.createElement("img");
+      logo.className = "expensive-id-logo expensive-id-logo--" + idPrefix;
+      logo.src = "assets/images/business-card-" + idPrefix + ".svg";
+      logo.alt = "";
+      logo.setAttribute("aria-hidden", "true");
+      logo.loading = "lazy";
+      logo.onerror = function () { this.hidden = true; };
+      idStack.appendChild(logo);
+    }
+    idCell.appendChild(idStack);
+    row.appendChild(idCell);
     addBadgeCell(row, product.format, "expensive-chip expensive-chip--format");
     addCell(row, product.quality || "Very High");
     addBadgeCell(row, product.expiry, "expensive-chip expensive-chip--expiry");
