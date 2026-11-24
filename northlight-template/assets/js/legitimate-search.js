@@ -23,7 +23,7 @@ function filteredProducts(){
   const searchable=clean(p.name).toLowerCase();
   return (!q||searchable.includes(q))&&(!format||clean(p.format).toLowerCase()===format);
  });
- list.sort((a,b)=>Number(a.id||0)-Number(b.id||0));
+ list.sort((a,b)=>Number(b.id||0)-Number(a.id||0));
  return list;
 }
 function render(){
