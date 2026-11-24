@@ -49,6 +49,7 @@ function setupCountryAutocomplete(){
    if(event.key==="ArrowDown"&&menu.classList.contains("open")){event.preventDefault();menu.querySelector(".lp-country-option[role=option]")?.focus();}
   });
   menu.addEventListener("click",event=>{
+   event.preventDefault();
    const option=event.target.closest("[data-country-name]");if(!option)return;
    const name=option.dataset.countryName,codeValue=option.dataset.countryCode;
    if(input===market){market.value=name;code.value=codeValue;}
