@@ -25,19 +25,48 @@ function countryCodeFor(value){const v=normalizeCountry(value);const match=count
 function countryNameFor(value){const v=String(value||"").trim().toUpperCase();return countryByCode[v]||countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(value))?.[0]||"";}
 function setupCountryAutocomplete(){
  const market=byId("market"),code=byId("intendedCountry");
- const marketList=byId("marketCountryOptions")||document.createElement("datalist");
- marketList.id="marketCountryOptions";
- marketList.innerHTML=countryEntries.map(([name,countryCode])=>'<option value="'+esc(name)+'" label="'+countryCode+'"></option>').join("");
- if(!marketList.parentNode)document.body.appendChild(marketList);
- market.setAttribute("list",marketList.id);
- const codeList=byId("countryCodeOptions")||document.createElement("datalist");
- codeList.id="countryCodeOptions";
- codeList.innerHTML=countryEntries.map(([name,countryCode])=>'<option value="'+countryCode+'" label="'+esc(name)+'"></option>').join("");
- if(!codeList.parentNode)document.body.appendChild(codeList);
- code.setAttribute("list",codeList.id);
- market.addEventListener("input",()=>{const match=countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(market.value));code.value=match?match[1]:"";updateStateOptions();});
+ const configs=[
+  {input:market,menu:byId("marketCountryMenu"),format:([name,countryCode])=>name,match:([name,codeValue],q)=>normalizeCountry(name).includes(normalizeCountry(q))||codeValue.toLowerCase().includes(normalizeCountry(q))},
+  {input:code,menu:byId("countryCodeMenu"),format:([name,countryCode])=>countryCode+" — "+name,match:([name,codeValue],q)=>codeValue.toLowerCase().includes(normalizeCountry(q))||normalizeCountry(name).includes(normalizeCountry(q))}
+ ];
+ function closeMenus(except){configs.forEach(c=>{if(c!==except){c.menu.classList.remove("open");c.input.setAttribute("aria-expanded","false");}});}
+ function renderOptions(config){
+  const query=config.input.value.trim();
+  const matches=countryEntries.filter(entry=>!query||config.match(entry,query));
+  config.menu.innerHTML=matches.length?matches.map(([name,codeValue])=>'<button type="button" class="lp-country-option" role="option" data-country-name="'+esc(name)+'" data-country-code="'+codeValue+'">'+esc(config.format([name,codeValue]))+'</button>').join(""):'<div class="lp-country-option">No matching supported country</div>';
+ }
+ configs.forEach(config=>{
+  const {input,menu}=config;
+  input.addEventListener("focus",()=>{closeMenus(config);renderOptions(config);menu.classList.add("open");input.setAttribute("aria-expanded","true");});
+  input.addEventListener("input",()=>{
+   closeMenus(config);renderOptions(config);menu.classList.add("open");input.setAttribute("aria-expanded","true");
+   const match=countryEntries.find(([name,codeValue])=>normalizeCountry(name)===normalizeCountry(input.value)||codeValue.toLowerCase()===normalizeCountry(input.value));
+   if(input===market){code.value=match?match[1]:"";updateStateOptions();}
+   else if(match){market.value=match[0];updateStateOptions();}
+  });
+  input.addEventListener("keydown",event=>{
+   if(event.key==="Escape"){menu.classList.remove("open");input.setAttribute("aria-expanded","false");}
+   if(event.key==="ArrowDown"&&menu.classList.contains("open")){event.preventDefault();menu.querySelector(".lp-country-option[role=option]")?.focus();}
+  });
+  menu.addEventListener("click",event=>{
+   const option=event.target.closest("[data-country-name]");if(!option)return;
+   const name=option.dataset.countryName,codeValue=option.dataset.countryCode;
+   if(input===market){market.value=name;code.value=codeValue;}
+   else{code.value=codeValue;market.value=name;}
+   updateStateOptions();menu.classList.remove("open");input.setAttribute("aria-expanded","false");
+  });
+ });
+ document.querySelectorAll("[data-country-toggle]").forEach(button=>button.addEventListener("click",()=>{
+  const config=configs.find(c=>c.input.id===button.dataset.countryToggle);if(!config)return;
+  const isOpen=config.menu.classList.contains("open");
+  closeMenus(config);
+  if(isOpen){config.menu.classList.remove("open");config.input.setAttribute("aria-expanded","false");}
+  else{renderOptions(config);config.menu.classList.add("open");config.input.setAttribute("aria-expanded","true");config.input.focus();}
+ }));
+ document.addEventListener("click",event=>{
+  if(!event.target.closest(".lp-country-picker"))closeMenus(null);
+ });
  market.addEventListener("change",()=>{const match=countryEntries.find(([name])=>normalizeCountry(name)===normalizeCountry(market.value));code.value=match?match[1]:"";updateStateOptions();});
- code.addEventListener("input",()=>{const name=countryNameFor(code.value);if(name){market.value=name;updateStateOptions();}});
  code.addEventListener("change",()=>{const name=countryNameFor(code.value);if(name){market.value=name;code.value=countryCodeFor(name);updateStateOptions();}});
 }
 async function request(url,options={}){const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Accept":"application/json",...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||("Request failed ("+response.status+")"));return data;}
