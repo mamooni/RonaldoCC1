@@ -1,0 +1,5808 @@
+#!/usr/bin/env python3
+"""
+Northlight server
+=======================
+
+A small, dependency-free HTTP server that does two things:
+
+  1. serves the storefront files (index.html, signup.html, login.html, ...)
+  2. exposes a JSON API for account creation and sign-in
+
+Run it from anywhere:
+
+    python3 server/app.py             # http://localhost:8000
+    PORT=3000 python3 server/app.py   # different port
+
+Everything is Python standard library + SQLite, so there is nothing to install.
+
+API
+---
+    POST /api/signup   {username, email, password}  -> 201 {user}
+    POST /api/login    {username, password}         -> 200 {user}
+    POST /api/logout                                 -> 204
+    GET  /api/me                                     -> 200 {user} | 401
+    GET  /api/payments                               -> 200 {payments} (own deposits)
+    POST /api/account/email    {email}               -> 200 {user}
+    POST /api/account/password {current, password}   -> 200 {ok}
+    POST /api/payments         {amount, asset}       -> 201 {payment}   (pending)
+    GET  /api/admin/data                             -> 200 {stats, users, payments}
+    POST /api/admin/payment    {id, status}          -> 200 {ok}        (admin only)
+    GET  /api/postcode?code=&country=                -> 200 {postcode, place, verified}
+                                                        | 404, cached in SQLite
+
+Sessions are opaque random tokens stored (hashed) in SQLite and sent to the
+browser in an HttpOnly, SameSite=Lax cookie. Passwords are hashed with
+scrypt and a per-user salt — never stored in the clear.
+
+What is deliberately simple, because this is a learning/demo project:
+
+  * single-process, threaded server; SQLite in WAL mode
+  * in-memory rate limiting (resets when the process restarts)
+  * no email verification, password reset or account lockout
+  * the cookie is not marked Secure, so it also works over plain http on
+    localhost. Put this behind HTTPS in production and add "Secure".
+"""
+
+import base64
+import calendar
+import contextlib
+import csv
+import hashlib
+import io
+import hmac
+import json
+import mimetypes
+import os
+import re
+import secrets
+import sqlite3
+import time
+import urllib.request
+import urllib.parse
+import urllib.error
+import threading
+import traceback
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_UP
+from datetime import date, datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import quote, unquote
+
+# --------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------
+
+HERE = Path(__file__).resolve().parent
+WEB_ROOT = HERE.parent  # the template folder that holds the .html files
+DATA_DIR = HERE / "data"
+
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8000"))
+
+# NL_DB lets a test run (or a second instance) use its own database file.
+DB_PATH = Path(os.environ.get("NL_DB") or (DATA_DIR / "northlight.db"))
+
+# Which engine holds the data.
+#   NL_DB_KIND=sqlite   (default) the file above — nothing to install
+#   NL_DB_KIND=mysql    a MySQL / MariaDB server, e.g. XAMPP on your laptop:
+#                       NL_MYSQL_HOST=127.0.0.1  NL_MYSQL_PORT=3306
+#                       NL_MYSQL_USER=root       NL_MYSQL_PASSWORD=
+#                       NL_MYSQL_DATABASE=northlight
+#                       Import database/northlight.sql once (phpMyAdmin).
+DB_KIND = (os.environ.get("NL_DB_KIND") or "sqlite").strip().lower()
+if DB_KIND not in ("sqlite", "mysql"):
+    raise SystemExit(f"NL_DB_KIND must be sqlite or mysql, not {DB_KIND!r}")
+
+MYSQL = {
+    "host": os.environ.get("NL_MYSQL_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("NL_MYSQL_PORT", "3306")),
+    "user": os.environ.get("NL_MYSQL_USER", "root"),
+    "password": os.environ.get("NL_MYSQL_PASSWORD", ""),
+    "database": os.environ.get("NL_MYSQL_DATABASE", "northlight"),
+    "charset": "utf8mb4",
+}
+
+SESSION_COOKIE = "nl_session"
+SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
+
+TURNSTILE_SITE_KEY = os.environ.get("NL_TURNSTILE_SITE_KEY", "").strip()
+TURNSTILE_SECRET = os.environ.get("NL_TURNSTILE_SECRET", "").strip()
+SMTP_HOST = os.environ.get("NL_SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("NL_SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("NL_SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("NL_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("NL_SMTP_FROM", "").strip()
+RESEND_API_KEY = os.environ.get("NL_RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("NL_RESEND_FROM", "").strip()
+PUBLIC_BASE_URL = os.environ.get("NL_PUBLIC_BASE_URL", "").rstrip("/")
+# CoinGecko API configuration
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "").strip()
+COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
+
+
+# Cache prices briefly to avoid unnecessary API calls.
+COINGECKO_PRICE_CACHE = None
+COINGECKO_PRICE_CACHE_TIME = 0
+COINGECKO_PRICE_CACHE_LOCK = threading.Lock()
+COINGECKO_PRICE_CACHE_TTL = 60
+
+COINGECKO_COINS = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "LTC": "litecoin",
+    "SOL": "solana",
+    "USDT": "tether",
+}
+
+
+def get_crypto_prices():
+    """Return validated USD prices from CoinGecko. Never use fallback rates."""
+    global COINGECKO_PRICE_CACHE, COINGECKO_PRICE_CACHE_TIME
+
+    if not COINGECKO_API_KEY:
+        raise RuntimeError("CoinGecko API key is not configured.")
+
+    with COINGECKO_PRICE_CACHE_LOCK:
+        now = time.time()
+
+        if (
+            COINGECKO_PRICE_CACHE is not None
+            and now - COINGECKO_PRICE_CACHE_TIME < COINGECKO_PRICE_CACHE_TTL
+        ):
+            return COINGECKO_PRICE_CACHE.copy()
+
+        params = urllib.parse.urlencode({
+            "ids": ",".join(COINGECKO_COINS.values()),
+            "vs_currencies": "usd",
+            "precision": "full",
+        })
+
+        url = f"{COINGECKO_API_URL}/simple/price?{params}"
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "x-cg-demo-api-key": COINGECKO_API_KEY,
+                "Accept": "application/json",
+                "User-Agent": "Northlight/1.0",
+            },
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not retrieve live crypto prices: {type(exc).__name__}"
+            ) from exc
+
+        prices = {}
+
+        for symbol, coin_id in COINGECKO_COINS.items():
+            try:
+                price = Decimal(str(data[coin_id]["usd"]))
+            except (KeyError, TypeError, InvalidOperation):
+                raise RuntimeError(f"Missing or invalid CoinGecko price for {symbol}.")
+
+            if not price.is_finite() or price <= 0:
+                raise RuntimeError(f"Invalid CoinGecko price for {symbol}.")
+
+            prices[symbol] = price
+
+        COINGECKO_PRICE_CACHE = prices
+        COINGECKO_PRICE_CACHE_TIME = now
+
+        return prices.copy()
+
+
+MAX_BODY = 128 * 1024     # Allows an admin to submit the edited catalogue CSV
+MAX_DRAIN = 256 * 1024    # anything larger gets the connection closed
+
+# Behind HTTPS (or a TLS terminator) set NL_HTTPS=1 so the session cookie
+# carries "Secure" and the server advertises HSTS.
+HTTPS_ONLY = os.environ.get("NL_HTTPS", "") not in ("", "0", "false", "no")
+# Frame protection is off by default because the preview panel embeds these
+# pages in an iframe; turn it on for a real deployment.
+STRICT_HEADERS = os.environ.get("NL_STRICT_HEADERS", "") not in ("", "0", "false", "no")
+
+
+# Refuse to boot with the built-in admin password unless explicitly allowed.
+ALLOW_DEFAULT_ADMIN = os.environ.get("NL_ALLOW_DEFAULT_ADMIN", "") not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
+DEFAULT_ADMIN_PASSWORD = "Admin!2345"
+
+# Requests that change state must come from this host (or from no origin at
+# all, which is what a script or curl sends).
+CHECK_ORIGIN = os.environ.get("NL_CHECK_ORIGIN", "1") not in ("0", "false", "no")
+
+REQUEST_TIMEOUT = 15  # seconds a single connection may sit idle
+MAX_THREADS = 64      # concurrent connections
+
+# Pages that require a signed-in account. Requests for these are redirected to
+# the login page by the server itself, so the store is never sent to a guest.
+GATED_PAGES = {
+    "index.html",
+    "deposit.html",
+    "messages.html",
+    "search.html",
+    "cart.html",
+    "tickets.html",
+    "settings.html",
+    "activity.html",
+    "support.html",
+    "preview.html",
+    "deposit-preview.html",
+    "messages-preview.html",
+    "search-preview.html",
+}
+LOGIN_PATH = "/login.html"
+SIGNUP_PATH = "/signup.html"
+
+# Files that must never be served as static content
+# Pages that require the admin role, not merely a session.
+ADMIN_PAGES = {"admin.html", "legitimate-admin.html"}
+
+BLOCKED_PREFIXES = ("server/", "server\\", ".git/", ".arena/")
+BLOCKED_SUFFIXES = (
+    ".db", ".db-wal", ".db-shm", ".db-journal", ".sqlite", ".sql",
+    ".py", ".pyc", ".pyo", ".sh", ".bat", ".key", ".pem", ".env",
+    ".log", ".bak", ".orig", ".rej", ".zip", ".tar", ".gz",
+)
+BLOCKED_NAMES = (".gitignore", ".gitattributes", ".env", ".env.example", "geoapify.key")
+
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+MIN_PASSWORD = 8
+
+# every new account starts empty: money only arrives through a confirmed deposit
+NEW_USER_CENTS = 0
+
+# --- Geoapify postcode lookups -------------------------------------------
+# The key never reaches the browser: the page calls /api/postcode and this
+# process talks to Geoapify. Set GEOAPIFY_KEY in the environment, or drop the
+# key in server/geoapify.key (one line, nothing else).
+GEOAPIFY_KEY_FILE = Path(__file__).resolve().parent / "geoapify.key"
+GEOAPIFY_URL = "https://api.geoapify.com/v1/geocode/search"
+POSTCODE_TIMEOUT = 8
+POSTCODE_TTL = 60 * 60 * 24 * 30       # cache hits/misses for a month
+POSTCODE_LIMIT = 30                     # lookups per IP per minute
+
+
+def geoapify_key() -> str:
+    key = os.environ.get("GEOAPIFY_KEY", "").strip()
+    if key:
+        return key
+    if GEOAPIFY_KEY_FILE.exists():
+        return GEOAPIFY_KEY_FILE.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def look_up_postcode(country: str, code: str):
+    """Ask Geoapify for one postcode. Returns dict or None when not found."""
+    key = geoapify_key()
+    if not key:
+        return None
+
+    query = urllib.parse.urlencode(
+        {
+            "text": code,
+            "filter": "countrycode:" + country.lower(),
+            "type": "postcode",
+            "limit": 1,
+            "apiKey": key,
+        }
+    )
+    request = urllib.request.Request(
+        GEOAPIFY_URL + "?" + query, headers={"Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=POSTCODE_TIMEOUT) as response:
+            payload = json.load(response)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as error:
+        print("  postcode lookup failed:", error)
+        return None
+
+    features = payload.get("features") or []
+    if not features:
+        return None
+
+    props = features[0].get("properties", {})
+    city = (props.get("city") or props.get("suburb") or props.get("county") or "").strip()
+    state = (props.get("state") or "").strip()
+    return {
+        "postcode": (props.get("postcode") or code).strip(),
+        "place": ", ".join(part for part in (city, state) if part),
+        "formatted": props.get("formatted", ""),
+    }
+
+# --------------------------------------------------------------------------
+# Database
+# --------------------------------------------------------------------------
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'user',
+    -- money is kept in whole cents: no float drift, ever
+    balance_cents INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+
+-- postcode lookups are cached so a repeated check costs no API credit
+CREATE TABLE IF NOT EXISTS legitimate_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    format TEXT NOT NULL,
+    seller TEXT NOT NULL DEFAULT '',
+    quality TEXT NOT NULL DEFAULT 'Very High',
+    market TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    product_code TEXT,
+    expiry TEXT NOT NULL DEFAULT '',
+    intended_country TEXT NOT NULL DEFAULT '',
+    refund_period INTEGER NOT NULL DEFAULT 0 CHECK (refund_period IN (0, 3)),
+    price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+    image_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS legitimate_products_public
+    ON legitimate_products(status, created_at, id);
+
+CREATE TABLE IF NOT EXISTS postcodes (
+    country    TEXT NOT NULL,
+    code       TEXT NOT NULL,
+    found      INTEGER NOT NULL,
+    place      TEXT,
+    formatted  TEXT,
+    checked_at INTEGER NOT NULL,
+    PRIMARY KEY (country, code)
+);
+"""
+
+# --------------------------------------------------------------------------
+# MySQL: a sqlite3-shaped façade so the rest of this file does not care
+# --------------------------------------------------------------------------
+#
+# Every query in the app is written with "?" placeholders and dictionaries for
+# rows, which is what sqlite3 gives us. PyMySQL can be wrapped in three small
+# translations (placeholders, rows, a handful of SQLite-only statements) and
+# then the same code runs on MySQL / MariaDB — including XAMPP's MariaDB.
+
+
+class _EmptyCursor:
+    """What a no-op statement (a PRAGMA) returns."""
+
+    lastrowid = None
+    rowcount = 0
+
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+    def __iter__(self):
+        return iter(())
+
+
+class _Cursor:
+    def __init__(self, cursor):
+        self._c = cursor
+
+    @property
+    def lastrowid(self):
+        return self._c.lastrowid
+
+    @property
+    def rowcount(self):
+        return self._c.rowcount
+
+    def fetchone(self):
+        return self._c.fetchone()
+
+    def fetchall(self):
+        return self._c.fetchall()
+
+    def __iter__(self):
+        return iter(self._c.fetchall())
+
+
+_INSERT_OR_IGNORE = re.compile(r"\bINSERT\s+OR\s+IGNORE\b", re.IGNORECASE)
+_UPSERT = re.compile(
+    r"ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+UPDATE\s+SET\s+(.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _to_mysql(sql):
+    """Translate one SQLite statement into MySQL. None means 'skip me'."""
+    text = sql.strip().rstrip(";")
+    upper = text.upper()
+
+    # PRAGMA is SQLite bookkeeping: nothing to do on a server that has
+    # transactions and foreign keys switched on by the table definitions.
+    if upper.startswith("PRAGMA"):
+        return None
+
+    text = text.replace("BEGIN IMMEDIATE", "START TRANSACTION")
+    text = _INSERT_OR_IGNORE.sub("INSERT IGNORE", text)
+
+    upsert = _UPSERT.search(text)
+    if upsert:
+        assignments = re.sub(r"excluded\.(\w+)", r"VALUES(\1)", upsert.group(1))
+        text = text[: upsert.start()] + "ON DUPLICATE KEY UPDATE " + assignments
+
+    return text
+
+
+class _MySQLConn:
+    """A sqlite3 connection look-alike over PyMySQL."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        text = _to_mysql(sql)
+        if text is None:
+            return _EmptyCursor()
+        cursor = self._conn.cursor()
+        if params:
+            # % is the placeholder marker in PyMySQL's own formatting
+            cursor.execute(text.replace("%", "%%").replace("?", "%s"), tuple(params))
+        else:
+            cursor.execute(text)
+        return _Cursor(cursor)
+
+    def executescript(self, script):
+        for statement in script.split(";"):
+            if statement.strip():
+                self.execute(statement)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+
+
+def _mysql_connect():
+    try:
+        import pymysql
+        import pymysql.cursors
+    except ImportError:  # pragma: no cover
+        raise SystemExit(
+            "NL_DB_KIND=mysql needs PyMySQL. Install it with:\n"
+            "    python3 -m pip install pymysql"
+        )
+
+    HERE = Path(__file__).resolve().parent
+    ca_path = HERE / "isrgrootx1.pem"
+
+    conn = pymysql.connect(
+        **MYSQL,
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+        connect_timeout=10,
+        read_timeout=30,
+        write_timeout=30,
+        ssl_ca=str(ca_path),
+        ssl_verify_cert=True,
+        ssl_verify_identity=True,
+    )
+    return _MySQLConn(conn)
+
+
+@contextlib.contextmanager
+def _mysql_db(write=False):
+    conn = _mysql_connect()
+    try:
+        if write:
+            conn.execute("START TRANSACTION")
+        yield conn
+        if write:
+            conn.commit()
+    except BaseException:
+        if write:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        conn.close()
+
+
+@contextlib.contextmanager
+def db(write=False):
+    """One short-lived connection per request.
+
+    A writer opens its transaction with BEGIN IMMEDIATE, so two requests can
+    never interleave a read-then-write on the same row — SQLite serialises the
+    writers instead of us guessing with a process-wide lock. Readers in WAL
+    mode do not block anybody.
+    """
+    if DB_KIND == "mysql":
+        with _mysql_db(write) as conn:
+            yield conn
+        return
+
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=10000")
+    try:
+        if write:
+            conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        if write:
+            conn.execute("COMMIT")
+    except BaseException:
+        if write:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+        raise
+    finally:
+        conn.close()
+
+
+ADMIN_USERNAME = os.environ.get("NL_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("NL_ADMIN_PASSWORD", "Admin!2345")
+
+PAYMENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS payments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL,
+    asset        TEXT    NOT NULL DEFAULT 'USDT',
+    network      TEXT    NOT NULL DEFAULT 'TRC-20',
+    status       TEXT    NOT NULL DEFAULT 'pending',   -- pending | confirmed | failed
+    request_id   TEXT,                                 -- client key: makes retries safe
+    created_at   INTEGER NOT NULL,
+    decided_at   INTEGER,
+    decided_by   INTEGER,
+    CHECK (status IN ('pending', 'confirmed', 'failed')),
+    CHECK (amount_cents > 0)
+);
+CREATE INDEX IF NOT EXISTS payments_status ON payments(status, id);
+CREATE INDEX IF NOT EXISTS payments_user ON payments(user_id);
+-- one row per client request, so a re-sent request returns the same payment
+CREATE UNIQUE INDEX IF NOT EXISTS payments_request
+    ON payments(user_id, request_id) WHERE request_id IS NOT NULL;
+"""
+
+PURCHASES_TABLE = """
+CREATE TABLE IF NOT EXISTS purchases (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    goods_id    TEXT    NOT NULL,
+    title       TEXT    NOT NULL,
+    price_cents INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL,
+    CHECK (price_cents > 0)
+);
+CREATE INDEX IF NOT EXISTS purchases_user ON purchases(user_id, id);
+"""
+
+CHEAP_PRODUCT_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS cheap_product_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS cheap_product_orders_user ON cheap_product_orders(user_id, id);
+
+CREATE TABLE IF NOT EXISTS cheap_product_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES cheap_product_orders(id) ON DELETE CASCADE,
+    goods_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    UNIQUE (order_id, goods_id)
+);
+CREATE INDEX IF NOT EXISTS cheap_product_order_items_order ON cheap_product_order_items(order_id);
+"""
+
+EXPENSIVE_PRODUCTS_TABLE = """
+CREATE TABLE IF NOT EXISTS expensive_products (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id    TEXT,
+    exp_date      TEXT,
+    title         TEXT NOT NULL,
+    creator       TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    formats       TEXT NOT NULL,
+    license       TEXT NOT NULL,
+    refund_period TEXT NOT NULL,
+    country_code  TEXT,
+    price_cents   INTEGER NOT NULL CHECK (price_cents > 0),
+    blurb         TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS expensive_products_created
+    ON expensive_products(created_at, id);
+"""
+
+EXPENSIVE_PRODUCT_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS expensive_product_orders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+    full_name   TEXT,
+    status      TEXT NOT NULL DEFAULT 'awaiting_customer_name'
+                CHECK (status IN (
+                    'awaiting_customer_name',
+                    'awaiting_fulfilment',
+                    'fulfilled'
+                )),
+    created_at  INTEGER NOT NULL,
+    UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS expensive_product_orders_user
+    ON expensive_product_orders(user_id, id);
+
+CREATE TABLE IF NOT EXISTS expensive_product_order_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id    INTEGER NOT NULL
+                REFERENCES expensive_product_orders(id) ON DELETE CASCADE,
+    product_id  INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+    quantity    INTEGER NOT NULL CHECK (quantity > 0),
+    UNIQUE (order_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS expensive_product_order_items_order
+    ON expensive_product_order_items(order_id);
+"""
+ 
+LEGITIMATE_PRODUCT_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS legitimate_product_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+    full_name TEXT,
+    status TEXT NOT NULL DEFAULT 'awaiting_customer_name'
+        CHECK (status IN ('awaiting_customer_name','awaiting_fulfilment','fulfilled')),
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS legitimate_product_orders_user ON legitimate_product_orders(user_id, id);
+CREATE TABLE IF NOT EXISTS legitimate_product_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES legitimate_product_orders(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    UNIQUE (order_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS legitimate_product_order_items_order ON legitimate_product_order_items(order_id);
+"""
+
+
+# Every privileged or money-moving action lands here, so a deposit can always
+# be traced back to the request that created it and the admin who decided it.
+AUDIT_TABLE = """
+CREATE TABLE IF NOT EXISTS audit (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at       INTEGER NOT NULL,
+    actor_id INTEGER,
+    actor    TEXT,
+    action   TEXT NOT NULL,
+    target   TEXT,
+    detail   TEXT,
+    ip       TEXT
+);
+CREATE INDEX IF NOT EXISTS audit_at ON audit(at);
+CREATE INDEX IF NOT EXISTS audit_action ON audit(action, at);
+"""
+
+PASSWORD_RESETS_TABLE = """
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    used_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id);
+"""
+
+
+def _table_columns(conn, table: str):
+    if DB_KIND == "mysql":
+        return {
+            row["COLUMN_NAME"] if "COLUMN_NAME" in row else row["column_name"]
+            for row in conn.execute(
+                "SELECT column_name AS COLUMN_NAME FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = ?",
+                (table,),
+            ).fetchall()
+        }
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+
+
+def _country_catalogue():
+    """Read the same ISO country list used by the admin country dropdown."""
+    path = WEB_ROOT / "assets" / "js" / "countries.js"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return {
+        code: name
+        for code, name in re.findall(r'\["([A-Z]{2})",\s*"([^"]+)"\]', source)
+    }
+
+
+def _market_key(value):
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+
+def _country_code_from_market(value):
+    """Resolve a single country name/code; never guess multi-country markets."""
+    key = _market_key(value)
+    if not key:
+        return ""
+    aliases = {
+        "us": "US", "usa": "US", "u s a": "US", "united states of america": "US",
+        "uk": "GB", "u k": "GB", "great britain": "GB", "britain": "GB",
+        "south korea": "KR", "republic of korea": "KR",
+        "north korea": "KP", "uae": "AE", "u a e": "AE",
+        "ivory coast": "CI", "czech republic": "CZ",
+        "global": "GL", "worldwide": "GL",
+    }
+    if key in aliases:
+        return aliases[key]
+    countries = _country_catalogue()
+    for code, name in countries.items():
+        if key == _market_key(name) or key == code.casefold():
+            return code
+    return ""
+
+
+def _random_refund_periods(count):
+    """Return a one-time shuffled 75% zero / 25% three assignment."""
+    values = ["0"] * ((count * 3 + 3) // 4)
+    values.extend(["3"] * (count - len(values)))
+    secrets.SystemRandom().shuffle(values)
+    return values
+
+
+def _ensure_expensive_draft_fields(conn):
+    """Add workflow fields and safely backfill drafts created by the old importer."""
+    columns = _table_columns(conn, "expensive_product_drafts")
+    definitions = {
+        "csv_position": "INT NOT NULL DEFAULT 0",
+        "country_code": ("CHAR(2)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+        "refund_period": ("VARCHAR(8)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+        "blurb": ("VARCHAR(4000)" if DB_KIND == "mysql" else "TEXT") + " NOT NULL DEFAULT ''",
+    }
+    for name, definition in definitions.items():
+        if name not in columns:
+            conn.execute(
+                "ALTER TABLE expensive_product_drafts ADD COLUMN " + name + " " + definition
+            )
+
+    rows = conn.execute(
+        "SELECT product_id, intended_market, country_code, refund_period, blurb "
+        "FROM expensive_product_drafts ORDER BY product_id"
+    ).fetchall()
+    pending_refunds = [row for row in rows if not str(row["refund_period"] or "").strip()]
+    pending_ids = {row["product_id"] for row in pending_refunds}
+    assignments = _random_refund_periods(len(pending_refunds))
+    now = int(time.time())
+    for row, refund in zip(pending_refunds, assignments):
+        country = str(row["country_code"] or "").strip().upper()
+        if not country:
+            country = _country_code_from_market(row["intended_market"])
+        conn.execute(
+            "UPDATE expensive_product_drafts SET refund_period = ?, blurb = ?, "
+            "country_code = ?, updated_at = ? WHERE product_id = ?",
+            (refund, str(row["blurb"] or "").strip() or "Good", country, now, row["product_id"]),
+        )
+    for row in rows:
+        if row["product_id"] in pending_ids:
+            continue
+        blurb = str(row["blurb"] or "").strip()
+        country = str(row["country_code"] or "").strip().upper()
+        if not country:
+            country = _country_code_from_market(row["intended_market"])
+        if not blurb or not country:
+            conn.execute(
+                "UPDATE expensive_product_drafts SET blurb = ?, country_code = ?, updated_at = ? "
+                "WHERE product_id = ?",
+                (blurb or "Good", country, now, row["product_id"]),
+            )
+
+
+def _migrate_expensive_drafts_allow_duplicate_ids(conn):
+    """Rebuild expensive_product_drafts so product_id is no longer the primary key.
+
+    Existing rows are preserved. After this migration the same public Product ID
+    may appear on multiple draft (and later live) products; each row keeps its
+    own auto-increment id and is treated as a separate product.
+    """
+    columns = _table_columns(conn, "expensive_product_drafts")
+    if not columns:
+        return
+    if "id" in columns:
+        # Already migrated.
+        return
+
+    if DB_KIND == "mysql":
+        # Drop the old primary key and add an auto-increment id.
+        try:
+            conn.execute("ALTER TABLE expensive_product_drafts DROP PRIMARY KEY")
+        except Exception:
+            pass
+        try:
+            conn.execute(
+                "ALTER TABLE expensive_product_drafts "
+                "ADD COLUMN id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST"
+            )
+        except Exception:
+            # Column may already exist from a partial earlier run.
+            pass
+        try:
+            conn.execute(
+                "ALTER TABLE expensive_product_drafts "
+                "ADD KEY expensive_product_drafts_product_id (product_id)"
+            )
+        except Exception:
+            pass
+        return
+
+    # SQLite: rebuild the table.
+    conn.execute("""
+        CREATE TABLE expensive_product_drafts_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id TEXT NOT NULL,
+            csv_position INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
+            intended_market TEXT NOT NULL DEFAULT '',
+            formats TEXT NOT NULL DEFAULT '',
+            creator TEXT NOT NULL DEFAULT '',
+            license TEXT NOT NULL DEFAULT '',
+            expiry TEXT NOT NULL DEFAULT '',
+            price_usd TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'Draft',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            created_by INTEGER,
+            country_code TEXT NOT NULL DEFAULT '',
+            refund_period TEXT NOT NULL DEFAULT '',
+            blurb TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    # Copy whatever columns currently exist.
+    existing = [c for c in (
+        "product_id", "csv_position", "title", "category", "intended_market",
+        "formats", "creator", "license", "expiry", "price_usd", "status",
+        "created_at", "updated_at", "created_by", "country_code",
+        "refund_period", "blurb"
+    ) if c in columns]
+    cols_sql = ", ".join(existing)
+    conn.execute(
+        f"INSERT INTO expensive_product_drafts_new ({cols_sql}) "
+        f"SELECT {cols_sql} FROM expensive_product_drafts"
+    )
+    conn.execute("DROP TABLE expensive_product_drafts")
+    conn.execute("ALTER TABLE expensive_product_drafts_new RENAME TO expensive_product_drafts")
+
+
+def _lagos_catalogue_date():
+    """Return today's calendar date in Nigeria (UTC+1; no daylight saving)."""
+    return datetime.now(timezone(timedelta(hours=1))).date().isoformat()
+
+
+def _ensure_expensive_catalogue_dates(conn):
+    """Add a display-only date and backfill existing goods without touching created_at."""
+    columns = _table_columns(conn, "expensive_products")
+    if "catalogue_date" not in columns:
+        column_type = "DATE" if DB_KIND == "mysql" else "TEXT"
+        conn.execute(
+            "ALTER TABLE expensive_products ADD COLUMN catalogue_date " + column_type
+        )
+    if "csv_position" not in columns:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN csv_position INT NOT NULL DEFAULT 0")
+
+    if DB_KIND == "mysql":
+        index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("expensive_products", "expensive_products_catalogue_date"),
+        ).fetchone()
+        if index is None:
+            conn.execute(
+                "CREATE INDEX expensive_products_catalogue_date "
+                "ON expensive_products(catalogue_date, id)"
+            )
+    else:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS expensive_products_catalogue_date "
+            "ON expensive_products(catalogue_date, id)"
+        )
+
+    missing = conn.execute(
+        "SELECT id FROM expensive_products WHERE catalogue_date IS NULL ORDER BY id"
+    ).fetchall()
+    total = len(missing)
+    if not total:
+        return
+    first_day = date(2026, 10, 19)
+    span_days = 30
+    for index, row in enumerate(missing):
+        offset = 30 if total == 1 else (index * span_days + (total - 1) // 2) // (total - 1)
+        assigned = (first_day + timedelta(days=offset)).isoformat()
+        conn.execute(
+            "UPDATE expensive_products SET catalogue_date = ? WHERE id = ?",
+            (assigned, row["id"]),
+        )
+
+
+def _has_table(conn, name: str) -> bool:
+    if DB_KIND == "mysql":
+        return (
+            conn.execute(
+                "SELECT 1 AS hit FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = ?",
+                (name,),
+            ).fetchone()
+            is not None
+        )
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _ensure_legitimate_catalogue_columns(conn):
+    """Add fields to the isolated legitimate catalogue without touching legacy inventory."""
+    columns = _table_columns(conn, "legitimate_products")
+    if DB_KIND == "mysql":
+        additions = {
+            "quality": "VARCHAR(40) NOT NULL DEFAULT 'Very High'",
+            "market": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "state": "VARCHAR(100) NOT NULL DEFAULT ''",
+            "product_code": "VARCHAR(6) NULL",
+            "expiry": "VARCHAR(7) NOT NULL DEFAULT ''",
+            "intended_country": "CHAR(2) NOT NULL DEFAULT ''",
+            "refund_period": "TINYINT NOT NULL DEFAULT 0",
+        }
+    else:
+        additions = {
+            "quality": "TEXT NOT NULL DEFAULT 'Very High'",
+            "market": "TEXT NOT NULL DEFAULT ''",
+            "state": "TEXT NOT NULL DEFAULT ''",
+            "product_code": "TEXT",
+            "expiry": "TEXT NOT NULL DEFAULT ''",
+            "intended_country": "TEXT NOT NULL DEFAULT ''",
+            "refund_period": "INTEGER NOT NULL DEFAULT 0",
+        }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute("ALTER TABLE legitimate_products ADD COLUMN " + name + " " + definition)
+    if DB_KIND == "mysql":
+        index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("legitimate_products", "legitimate_products_code"),
+        ).fetchone()
+        if index is not None:
+            conn.execute("ALTER TABLE legitimate_products DROP INDEX legitimate_products_code")
+    else:
+        conn.execute("DROP INDEX IF EXISTS legitimate_products_code")
+
+
+def _migrate(conn):
+    """Bring an existing database up to date without losing anything.
+
+    SQLite only: a MySQL database is created complete by
+    database/northlight.sql, so there is nothing to migrate.
+
+    Older databases stored money as REAL. They are rebuilt once with the
+    amounts converted to whole cents; the ids and every row survive.
+    """
+    if DB_KIND != "mysql" and _has_table(conn, "payments") and "request_id" not in _table_columns(conn, "payments"):
+        conn.execute("ALTER TABLE payments ADD COLUMN request_id TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS payments_request "
+            "ON payments(user_id, request_id) WHERE request_id IS NOT NULL"
+        )
+
+    cols = _table_columns(conn, "users")
+    if "role" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+
+    if "balance_cents" not in cols:
+        if "balance" in cols:
+            _rebuild(conn, "users", """
+                CREATE TABLE users_new (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    password_hash TEXT NOT NULL,
+                    created_at    INTEGER NOT NULL,
+                    role          TEXT NOT NULL DEFAULT 'user',
+                    balance_cents INTEGER NOT NULL DEFAULT 0
+                )""", """
+                INSERT INTO users_new
+                    (id, username, email, password_hash, created_at, role, balance_cents)
+                SELECT id, username, email, password_hash, created_at,
+                       COALESCE(role, 'user'),
+                       CAST(ROUND(COALESCE(balance, 0) * 100) AS INTEGER)
+                FROM users""")
+            print("  migrated users.balance -> balance_cents (money is now in cents)")
+        else:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN balance_cents INTEGER NOT NULL DEFAULT 0"
+            )
+
+    if _has_table(conn, "payments"):
+        pcols = _table_columns(conn, "payments")
+        if "amount_cents" not in pcols:
+            _rebuild(conn, "payments", """
+                CREATE TABLE payments_new (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    amount_cents INTEGER NOT NULL,
+                    asset        TEXT    NOT NULL DEFAULT 'USDT',
+                    network      TEXT    NOT NULL DEFAULT 'TRC-20',
+                    status       TEXT    NOT NULL DEFAULT 'pending',
+                    created_at   INTEGER NOT NULL,
+                    decided_at   INTEGER,
+                    decided_by   INTEGER,
+                    CHECK (status IN ('pending', 'confirmed', 'failed')),
+                    CHECK (amount_cents > 0)
+                )""", """
+                INSERT INTO payments_new
+                    (id, user_id, amount_cents, asset, network, status,
+                     created_at, decided_at, decided_by)
+                SELECT id, user_id, CAST(ROUND(amount * 100) AS INTEGER),
+                       asset, network, status, created_at, decided_at, decided_by
+                FROM payments""")
+            print("  migrated payments.amount -> amount_cents (money is now in cents)")
+
+    conn.executescript(PAYMENTS_TABLE)
+    _ensure_legitimate_catalogue_columns(conn)
+    _migrate_legitimate_format_values(conn)
+    conn.executescript(PURCHASES_TABLE)
+    conn.executescript(CHEAP_PRODUCT_ORDERS_TABLE)
+    conn.executescript(EXPENSIVE_PRODUCTS_TABLE)
+
+    # Add catalogue fields to existing SQLite databases without rebuilding rows.
+    product_cols = _table_columns(conn, "expensive_products")
+    if "product_id" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN product_id TEXT")
+    if "exp_date" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN exp_date TEXT")
+    if "country_code" not in product_cols:
+        conn.execute("ALTER TABLE expensive_products ADD COLUMN country_code TEXT")
+    conn.execute("DROP INDEX IF EXISTS expensive_products_product_id")
+    _ensure_expensive_catalogue_dates(conn)
+
+    conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
+    conn.executescript(LEGITIMATE_PRODUCT_ORDERS_TABLE)
+    conn.executescript(AUDIT_TABLE)
+    conn.executescript(PASSWORD_RESETS_TABLE)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "product_id TEXT NOT NULL, csv_position INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', "
+        "category TEXT NOT NULL DEFAULT '', intended_market TEXT NOT NULL DEFAULT '', "
+        "formats TEXT NOT NULL DEFAULT '', creator TEXT NOT NULL DEFAULT '', "
+        "license TEXT NOT NULL DEFAULT '', expiry TEXT NOT NULL DEFAULT '', "
+        "price_usd TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Draft', "
+        "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, created_by INTEGER)"
+    )
+    _ensure_expensive_draft_fields(conn)
+    _migrate_expensive_drafts_allow_duplicate_ids(conn)
+
+
+
+def _migrate_legitimate_format_values(conn):
+    """Remove the old fixed-format constraint while preserving catalogue rows."""
+    if DB_KIND == "mysql":
+        try:
+            conn.execute("ALTER TABLE legitimate_products DROP CHECK legitimate_products_format")
+        except Exception as exc:
+            message = str(exc).lower()
+            if not any(word in message for word in ("check", "constraint", "doesn't exist")):
+                raise
+        conn.execute("ALTER TABLE legitimate_products MODIFY format VARCHAR(255) NOT NULL")
+        return
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='legitimate_products'"
+    ).fetchone()
+    table_sql = (row["sql"] or "") if row else ""
+    if "format IN ('physical', 'digital', 'service')" not in table_sql:
+        return
+    _rebuild(conn, "legitimate_products", """
+        CREATE TABLE legitimate_products_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            category TEXT NOT NULL,
+            format TEXT NOT NULL,
+            seller TEXT NOT NULL DEFAULT '',
+            quality TEXT NOT NULL DEFAULT 'Very High',
+            market TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT '',
+            product_code TEXT,
+            expiry TEXT NOT NULL DEFAULT '',
+            intended_country TEXT NOT NULL DEFAULT '',
+            refund_period INTEGER NOT NULL DEFAULT 0 CHECK (refund_period IN (0, 3)),
+            price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+            image_url TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )""", """
+        INSERT INTO legitimate_products_new
+            (id, name, description, category, format, seller, quality, market, state,
+             product_code, expiry, intended_country, refund_period, price_cents, image_url,
+             status, created_at, updated_at, created_by)
+        SELECT id, name, description, category, format, seller, quality, market, state,
+               product_code, expiry, intended_country, refund_period, price_cents, image_url,
+               status, created_at, updated_at, created_by
+        FROM legitimate_products""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS legitimate_products_public "
+        "ON legitimate_products(status, created_at, id)"
+    )
+
+
+def _rebuild(conn, table: str, create_sql: str, copy_sql: str):
+    """Swap a table for a new definition while keeping its rows and ids."""
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(create_sql)
+        conn.execute(copy_sql)
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if broken:
+        raise RuntimeError(f"migration of {table} left dangling references: {broken}")
+
+
+def _seed_admin(conn):
+    """Make sure one admin account exists, so the dashboard can be reached."""
+    row = conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()
+    if row is not None:
+        return
+
+    # someone may already have signed up with the admin username: promote them
+    existing = conn.execute(
+        "SELECT id FROM users WHERE username = ?", (ADMIN_USERNAME,)
+    ).fetchone()
+    if existing is not None:
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (existing["id"],))
+        conn.commit()
+        print(f"  promoted existing account {ADMIN_USERNAME!r} to admin")
+        return
+
+    conn.execute(
+        "INSERT INTO users (username, email, password_hash, created_at, role, balance_cents) "
+        "VALUES (?, ?, ?, ?, 'admin', 0)",
+        (
+            ADMIN_USERNAME,
+            f"{ADMIN_USERNAME}@northlight.local",
+            hash_password(ADMIN_PASSWORD),
+            int(time.time()),
+        ),
+    )
+    conn.commit()
+    conn.execute(
+        "INSERT INTO audit (at, actor, action, target, detail, ip) "
+        "VALUES (?, ?, 'admin.seed', ?, ?, ?)",
+        (int(time.time()), "system", ADMIN_USERNAME, "account created on first start", "-"),
+    )
+    conn.commit()
+    print(f"  created admin account {ADMIN_USERNAME!r}")
+
+
+def prune_sessions(conn):
+    """Drop sessions that have expired; called on boot and after each login."""
+    now = int(time.time())
+    removed = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,)).rowcount
+    conn.execute("DELETE FROM audit WHERE at < ?", (now - 180 * 24 * 3600,))
+    return removed
+
+
+MYSQL_TABLES = (
+    "users",
+    "sessions",
+    "payments",
+    "purchases",
+    "cheap_product_orders",
+    "cheap_product_order_items",
+    "expensive_products",
+    "expensive_product_orders",
+    "expensive_product_order_items",
+    "legitimate_product_orders",
+    "legitimate_product_order_items",
+    "expensive_product_drafts",
+    "audit",
+    "postcodes",
+    "password_resets",
+    "legitimate_products",
+)
+
+
+def init_mysql():
+    """Keep MySQL honest: the tables come from database/northlight.sql."""
+    conn = _mysql_connect()
+    try:
+        # Additive migration for existing MySQL/TiDB databases.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cheap_product_orders ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "user_id INT UNSIGNED NOT NULL, request_key CHAR(32) NOT NULL, "
+            "total_cents BIGINT NOT NULL, created_at BIGINT NOT NULL, "
+            "UNIQUE KEY cheap_orders_request (user_id, request_key), "
+            "KEY cheap_orders_user (user_id, id), "
+            "CONSTRAINT cheap_orders_user_fk FOREIGN KEY (user_id) "
+            "REFERENCES users(id) ON DELETE CASCADE, "
+            "CONSTRAINT cheap_orders_total_positive CHECK (total_cents > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cheap_product_order_items ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "order_id BIGINT UNSIGNED NOT NULL, goods_id VARCHAR(16) NOT NULL, "
+            "title VARCHAR(190) NOT NULL, price_cents BIGINT NOT NULL, "
+            "quantity INT UNSIGNED NOT NULL, "
+            "UNIQUE KEY cheap_order_product (order_id, goods_id), "
+            "KEY cheap_order_items_order (order_id), "
+            "CONSTRAINT cheap_order_items_order_fk FOREIGN KEY (order_id) "
+            "REFERENCES cheap_product_orders(id) ON DELETE CASCADE, "
+            "CONSTRAINT cheap_order_items_price_positive CHECK (price_cents > 0), "
+            "CONSTRAINT cheap_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_products ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "name VARCHAR(160) NOT NULL, description TEXT NOT NULL, "
+            "category VARCHAR(100) NOT NULL, format VARCHAR(255) NOT NULL, "
+            "seller VARCHAR(100) NOT NULL DEFAULT '', quality VARCHAR(40) NOT NULL DEFAULT 'Very High', "
+            "market VARCHAR(100) NOT NULL DEFAULT '', state VARCHAR(100) NOT NULL DEFAULT '', "
+            "product_code VARCHAR(6) NULL, expiry VARCHAR(7) NOT NULL DEFAULT '', "
+            "intended_country CHAR(2) NOT NULL DEFAULT '', refund_period TINYINT NOT NULL DEFAULT 0, "
+            "price_cents BIGINT NOT NULL, image_url VARCHAR(1000) NOT NULL DEFAULT '', "
+            "status VARCHAR(20) NOT NULL DEFAULT 'draft', "
+            "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, created_by INT UNSIGNED NULL, "
+            "KEY legitimate_products_public (status, created_at, id), "
+            "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
+            "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        _ensure_legitimate_catalogue_columns(conn)
+        _migrate_legitimate_format_values(conn)
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_product_orders ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, "
+            "request_key CHAR(36) NOT NULL, total_cents BIGINT NOT NULL, full_name VARCHAR(190) NULL, "
+            "status VARCHAR(32) NOT NULL DEFAULT 'awaiting_customer_name', created_at BIGINT NOT NULL, "
+            "UNIQUE KEY legitimate_orders_request (user_id, request_key), "
+            "KEY legitimate_orders_user (user_id, id), "
+            "CONSTRAINT legitimate_orders_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, "
+            "CONSTRAINT legitimate_orders_total_positive CHECK (total_cents > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS legitimate_product_order_items ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, order_id BIGINT UNSIGNED NOT NULL, "
+            "product_id BIGINT UNSIGNED NOT NULL, title VARCHAR(160) NOT NULL, price_cents BIGINT NOT NULL, "
+            "quantity INT UNSIGNED NOT NULL, UNIQUE KEY legitimate_order_product (order_id, product_id), "
+            "KEY legitimate_order_items_order (order_id), "
+            "CONSTRAINT legitimate_order_items_order_fk FOREIGN KEY (order_id) "
+            "REFERENCES legitimate_product_orders(id) ON DELETE CASCADE, "
+            "CONSTRAINT legitimate_order_items_price_positive CHECK (price_cents > 0), "
+            "CONSTRAINT legitimate_order_items_quantity_positive CHECK (quantity > 0)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS expensive_product_drafts ("
+            "id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+            "product_id VARCHAR(64) NOT NULL, "
+            "title VARCHAR(190) NOT NULL DEFAULT '', "
+            "category VARCHAR(100) NOT NULL DEFAULT '', "
+            "intended_market VARCHAR(100) NOT NULL DEFAULT '', "
+            "formats VARCHAR(255) NOT NULL DEFAULT '', "
+            "creator VARCHAR(100) NOT NULL DEFAULT '', "
+            "license VARCHAR(190) NOT NULL DEFAULT '', "
+            "expiry VARCHAR(7) NOT NULL DEFAULT '', "
+            "price_usd VARCHAR(32) NOT NULL DEFAULT '', "
+            "status VARCHAR(20) NOT NULL DEFAULT 'Draft', "
+            "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, "
+            "created_by INT UNSIGNED NULL, "
+            "country_code CHAR(2) NOT NULL DEFAULT '', "
+            "refund_period VARCHAR(8) NOT NULL DEFAULT '', "
+            "blurb VARCHAR(4000) NOT NULL DEFAULT '', "
+            "csv_position INT NOT NULL DEFAULT 0, "
+            "KEY expensive_product_drafts_status (status), "
+            "KEY expensive_product_drafts_product_id (product_id)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        missing = [t for t in MYSQL_TABLES if not _has_table(conn, t)]
+        if missing:
+            raise SystemExit(
+                "The MySQL database is missing these tables: "
+                + ", ".join(missing)
+                + "\nImport database/northlight.sql into `"
+                + MYSQL["database"]
+                + "` (phpMyAdmin → Import) and start again."
+            )
+        # MySQL/TiDB deployments need an explicit additive migration too.
+        product_cols = _table_columns(conn, "expensive_products")
+        if "product_id" not in product_cols:
+            conn.execute(
+                "ALTER TABLE expensive_products ADD COLUMN product_id VARCHAR(64) NULL"
+            )
+        if "exp_date" not in product_cols:
+            conn.execute(
+                "ALTER TABLE expensive_products ADD COLUMN exp_date DATE NULL"
+            )
+        _ensure_expensive_catalogue_dates(conn)
+        _ensure_expensive_draft_fields(conn)
+        _migrate_expensive_drafts_allow_duplicate_ids(conn)
+        product_id_index = conn.execute(
+            "SELECT 1 AS hit FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+            ("expensive_products", "expensive_products_product_id"),
+        ).fetchone()
+        if product_id_index is not None:
+            conn.execute("ALTER TABLE expensive_products DROP INDEX expensive_products_product_id")
+
+        _seed_admin(conn)
+        dropped = prune_sessions(conn)
+        conn.commit()
+        if dropped:
+            print(f"  dropped {dropped} expired session(s)")
+    finally:
+        conn.close()
+
+
+def init_db():
+    if DB_KIND == "mysql":
+        return init_mysql()
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        _seed_admin(conn)
+        dropped = prune_sessions(conn)
+        conn.commit()
+        if dropped:
+            print(f"  dropped {dropped} expired session(s)")
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------
+# Passwords and tokens
+# --------------------------------------------------------------------------
+
+SCRYPT_N = 2 ** 14
+SCRYPT_R = 8
+SCRYPT_P = 1
+
+
+def _b64(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def hash_password(password: str) -> str:
+    """scrypt$n$r$p$salt$hash — self-describing, so parameters can change later."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=SCRYPT_N,
+        r=SCRYPT_R,
+        p=SCRYPT_P,
+        dklen=32,
+        maxmem=64 * 1024 * 1024,
+    )
+    return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${_b64(salt)}${_b64(digest)}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        scheme, n, r, p, salt_b64, hash_b64 = stored.split("$")
+        if scheme != "scrypt":
+            return False
+        digest = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=base64.b64decode(salt_b64),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=32,
+            maxmem=64 * 1024 * 1024,
+        )
+        return hmac.compare_digest(digest, base64.b64decode(hash_b64))
+    except (ValueError, TypeError):
+        return False
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def new_session(conn, user_id: int, ttl: int = SESSION_TTL, keep: int = 10):
+    """Create a session. Only the newest `keep` sessions per account survive."""
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (token_hash(token), user_id, now + ttl, now),
+    )
+    # the derived table keeps MariaDB/MySQL happy (LIMIT is not allowed
+    # directly inside IN (...)) and behaves the same on SQLite
+    conn.execute(
+        "DELETE FROM sessions WHERE user_id = ? AND token_hash NOT IN ("
+        "  SELECT token_hash FROM ("
+        "    SELECT token_hash FROM sessions WHERE user_id = ? "
+        "    ORDER BY created_at DESC, token_hash DESC LIMIT ?"
+        "  ) AS newest)",
+        (user_id, user_id, keep),
+    )
+    return token
+
+
+_DUMMY_HASH = None
+
+
+def dummy_hash() -> str:
+    """A valid hash of a value nobody knows, built once, for timing parity."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password(secrets.token_urlsafe(24))
+    return _DUMMY_HASH
+
+
+def user_for_token(conn, token: str):
+    if not token:
+        return None
+    row = conn.execute(
+        "SELECT u.id, u.username, u.email, u.created_at, u.role, u.balance_cents, "
+        "s.expires_at "
+        "FROM sessions s JOIN users u ON u.id = s.user_id "
+        "WHERE s.token_hash = ?",
+        (token_hash(token),),
+    ).fetchone()
+
+    if row is None:
+        return None
+    if row["expires_at"] < int(time.time()):
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
+        conn.commit()
+        return None
+
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "created_at": row["created_at"],
+        "role": row["role"],
+        "balance": dollars(row["balance_cents"]),
+    }
+
+
+# --------------------------------------------------------------------------
+# Goods catalogue — the till reads the same list the page does
+# --------------------------------------------------------------------------
+
+# search.js numbers its rows 412345, 416345, 420345 ... so the shop and the
+# server agree on what "id 412345" costs without a second copy of the price list.
+def _goods_source():
+    """Where the catalogue lives — assets/js/ now, the root in older copies."""
+    for rel in ("assets/js/search.js", "search.js"):
+        candidate = WEB_ROOT / rel
+        if candidate.is_file():
+            return candidate
+    return WEB_ROOT / "assets" / "js" / "search.js"
+
+
+def _drops_source():
+    """The drops feed the table now, so the catalogue lives here when it exists."""
+    for rel in ("assets/data/drops-data.js", "drops-data.js"):
+        candidate = WEB_ROOT / rel
+        if candidate.is_file():
+            return candidate
+    return WEB_ROOT / "assets" / "data" / "drops-data.js"
+
+
+def _bundles_source():
+    """The Bundles page feed: same JSON-in-JS convention as the drops."""
+    for rel in ("assets/data/bundles-data.js", "bundles-data.js"):
+        candidate = WEB_ROOT / rel
+        if candidate.is_file():
+            return candidate
+    return WEB_ROOT / "assets" / "data" / "bundles-data.js"
+
+
+GOODS_JS = _goods_source()  # re-resolved on every read, so moving the file is fine
+DROPS_JS = _drops_source()
+BUNDLES_JS = _bundles_source()
+# Catalogue ids: six digits, a mix of leading blocks. Must stay identical to
+# goodsIds() in search.js — same prefixes, same arithmetic, same order.
+ID_PREFIXES = ("4", "51", "34", "60")
+
+
+def catalogue_ids(count):
+    """['4...', '51..', '34..', '60..', ...] in catalogue order."""
+    ids = []
+    seen = set()
+    for index in range(count):
+        prefix = ID_PREFIXES[index % len(ID_PREFIXES)]
+        width = 6 - len(prefix)
+        space = 10 ** width
+        h = ((index + 1) * 2654435761) % 2147483647
+        while True:
+            h = (h * 48271) % 2147483647
+            candidate = prefix + str(h % space).rjust(width, "0")
+            if candidate not in seen:
+                break
+        seen.add(candidate)
+        ids.append(candidate)
+    return ids
+
+
+def _drops_rows(path):
+    """[[title, creator, None, None, price], ...] out of window.NL_DROPS.
+
+    The array in drops-data.js is strict JSON, so this is a plain JSON read —
+    no JS parsing, no eval.
+    """
+    try:
+        source = path.read_text(encoding="utf-8")
+        start = source.index("[", source.index("window.NL_DROPS"))
+        drops, _ = json.JSONDecoder().raw_decode(source[start:])
+    except (OSError, ValueError):
+        return []
+
+    rows = []
+    for drop in drops:
+        if not isinstance(drop, dict):
+            continue
+        title = drop.get("title")
+        price = drop.get("price")
+        if not title or price is None:
+            continue
+        # same five-slot shape as a RAW row, so one consumer handles both
+        rows.append([str(title), str(drop.get("creator", "")), None, None, price])
+    return rows
+
+
+def bundle_rows(path=None):
+    """[[name, "Bundles", None, None, price], ...] from window.NL_BUNDLES.
+
+    Same five-slot shape as a drop row, so goods_catalogue() treats a bundle
+    exactly like any other listing: the price comes from this file, never from
+    the browser.
+    """
+    source_path = path or _bundles_source()
+    try:
+        source = source_path.read_text(encoding="utf-8")
+        start = source.index("[", source.index("window.NL_BUNDLES"))
+        end = source.rindex("]")
+        bundles = json.loads(source[start : end + 1])
+    except (OSError, ValueError):
+        return []
+
+    rows = []
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        name = bundle.get("name")
+        price = bundle.get("price")
+        if not name or price is None:
+            continue
+        rows.append([str(name), "Bundles", None, None, price])
+    return rows
+
+
+def _raw_rows(path):
+    """[[title, creator, category, format, price, ...], ...] from search.js."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        start = source.index("var RAW = [")
+        end = source.index("\n  ];", start)
+    except (OSError, ValueError):
+        return []
+
+    rows = []
+    for line in source[start:end].splitlines():
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            rows.append(json.loads(line.rstrip(",")))
+        except ValueError:
+            continue
+    return rows
+
+
+def catalogue_rows():
+    """Every listing the shop sells, whatever file it comes from."""
+    global DROPS_JS
+    DROPS_JS = _drops_source()
+    rows = _drops_rows(DROPS_JS)
+    if rows:
+        return rows
+    return _raw_rows(GOODS_JS)
+
+_goods_lock = threading.Lock()
+_goods_cache = {"mtime": None, "items": {}}
+
+
+def goods_catalogue():
+    """{id: {id, title, creator, price_cents}} read from the drops + bundles files.
+
+    Cached until those files change, so editing the catalogue is enough to change
+    what the shop sells — no restart, no duplicated price list.
+    """
+    global GOODS_JS, DROPS_JS, BUNDLES_JS
+    GOODS_JS = _goods_source()  # fallback only
+    DROPS_JS = _drops_source()
+    BUNDLES_JS = _bundles_source()
+
+    try:
+        # Watch the files that actually hold prices (drops + bundles).
+        mtime = (
+            DROPS_JS.stat().st_mtime if DROPS_JS.is_file() else 0,
+            BUNDLES_JS.stat().st_mtime if BUNDLES_JS.is_file() else 0,
+            GOODS_JS.stat().st_mtime if GOODS_JS.is_file() else 0,
+        )
+    except OSError:
+        return {}
+
+    with _goods_lock:
+        if _goods_cache["mtime"] == mtime:
+            return _goods_cache["items"]
+
+    # Drops first, then bundles: the drop ids stay exactly as they were, and the
+    # bundles simply continue the same sequence (so no id can ever collide).
+    
+    rows = catalogue_rows() + bundle_rows(BUNDLES_JS)
+
+    if not rows:
+        return {}
+
+    items = {}
+    ids = catalogue_ids(len(rows))
+    for index, row in enumerate(rows):
+        if len(row) < 5 or isinstance(row[4], bool):
+            continue
+        try:
+            price_cents = int(round(float(row[4]) * 100))
+        except (TypeError, ValueError):
+            continue
+        if price_cents <= 0:
+            continue
+        goods_id = ids[index]
+        items[goods_id] = {
+            "id": goods_id,
+            "title": str(row[0]),
+            "creator": str(row[1]),
+            "price_cents": price_cents,
+        }
+
+    with _goods_lock:
+        _goods_cache["mtime"] = mtime
+        _goods_cache["items"] = items
+    return items
+
+
+# --------------------------------------------------------------------------
+# Money — always integer cents inside, always dollars on the wire
+# --------------------------------------------------------------------------
+
+def dollars(cents) -> float:
+    """Cents -> the JSON number the pages already expect ($74.00 -> 74.0)."""
+    return round(float(cents or 0) / 100.0, 2)
+
+
+def parse_exp_date(value):
+    """Accept MM/YYYY and store the final calendar day of that month."""
+    if not isinstance(value, str):
+        return None, "Expiry date is required in MM/YYYY format."
+    match = re.fullmatch(r"(0[1-9]|1[0-2])/(\d{4})", value.strip())
+    if not match:
+        return None, "Expiry date must use MM/YYYY format."
+    month, year = int(match.group(1)), int(match.group(2))
+    if year < 2000:
+        return None, "Expiry year must be 2000 or later."
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-{last_day:02d}", None
+
+
+def display_exp_date(value):
+    """Display a stored YYYY-MM-DD date as MM/YYYY."""
+    if not value:
+        return ""
+    if hasattr(value, "isoformat"):
+        value = value.isoformat()
+    try:
+        return f"{int(value[5:7]):02d}/{int(value[:4]):04d}"
+    except (TypeError, ValueError, IndexError):
+        return ""
+
+
+def parse_cents(raw, low=0, high=0):
+    """Strictly parse a user-supplied amount.
+
+    Returns (cents, error). Rejects NaN/Infinity (which `float()` happily
+    accepts and which can slip past range checks, because every comparison
+    against NaN is False), anything with more than two decimals, and amounts
+    outside [low, high].
+    """
+    if isinstance(raw, bool) or raw is None:
+        return None, "Enter an amount."
+    if isinstance(raw, float) and (raw != raw or raw in (float("inf"), float("-inf"))):
+        return None, "Enter a real amount."
+    text = str(raw).strip().replace(",", "")
+    if text.startswith("$"):
+        text = text[1:].strip()
+    if not text:
+        return None, "Enter an amount."
+    try:
+        value = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None, "Enter an amount."
+    if not value.is_finite():
+        return None, "Enter a real amount."
+    if value != value.quantize(Decimal("0.01")):
+        return None, "Use at most two decimal places."
+    cents = int(value * 100)
+    if low is not None and cents < low:
+        return None, "That is below the minimum."
+    if high is not None and cents > high:
+        return None, "That is above the maximum."
+    return cents, None
+
+
+def audit(conn, action, actor=None, target=None, detail=None, ip=None):
+    """Write one audit row. Never raises: logging must not break a request."""
+    try:
+        conn.execute(
+            "INSERT INTO audit (at, actor_id, actor, action, target, detail, ip) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(time.time()),
+                (actor or {}).get("id"),
+                (actor or {}).get("username"),
+                action,
+                None if target is None else str(target),
+                None if detail is None else str(detail)[:500],
+                ip,
+            ),
+        )
+    except Exception as error:  # pragma: no cover - defensive
+        print("  audit write failed:", error)
+
+# --------------------------------------------------------------------------
+# Validation
+# --------------------------------------------------------------------------
+
+
+def verify_turnstile(token: str, remote_ip: str = "") -> bool:
+    """Verify a Cloudflare Turnstile token. Returns True if valid."""
+    if not TURNSTILE_SECRET:
+        # No secret configured — skip verification (local development only)
+        return True
+    if not token:
+        return False
+    data = urllib.parse.urlencode({
+        "secret": TURNSTILE_SECRET,
+        "response": token,
+        "remoteip": remote_ip or "",
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return bool(body.get("success"))
+    except Exception as exc:
+        print("Turnstile verification failed:", exc)
+        return False
+
+
+
+def send_email(to_email: str, subject: str, html_body: str) -> bool:
+    """Send an email via Resend. Returns True on success."""
+    if not RESEND_API_KEY:
+        print("RESEND_API_KEY not set — cannot send email")
+        return False
+    payload = {
+        "from": RESEND_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return 200 <= resp.status < 300
+    except Exception as exc:
+        print("Resend send failed:", exc)
+        return False
+
+
+def create_password_reset(conn, user_id: int) -> str:
+    """Create a reset token, store its hash, return the raw token."""
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    expires = now + 60 * 60  # 1 hour
+    # invalidate any previous unused tokens for this user
+    conn.execute(
+        "UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+        (now, user_id),
+    )
+    conn.execute(
+        "INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+        (token_hash, user_id, expires, now),
+    )
+    return raw
+
+
+def validate_signup(payload):
+    """Returns (clean_values, field_errors)."""
+    errors = {}
+
+    username = str(payload.get("username", "")).strip()
+    email = str(payload.get("email", "")).strip()
+    password = str(payload.get("password", ""))
+
+    if not username:
+        errors["username"] = "Choose a username."
+    elif not USERNAME_RE.match(username):
+        errors["username"] = (
+            "3-32 characters: letters, numbers, dots, dashes or underscores."
+        )
+
+    if not email:
+        errors["email"] = "Enter your email address."
+    elif len(email) > 254 or not EMAIL_RE.match(email):
+        errors["email"] = "That email address looks off."
+
+    if len(password) < MIN_PASSWORD:
+        errors["password"] = f"Use at least {MIN_PASSWORD} characters."
+    elif not re.search(r"[A-Za-z]", password):
+        errors["password"] = "Add at least one letter."
+    elif not re.search(r"\d", password):
+        errors["password"] = "Add at least one number."
+    elif not re.search(r"[^A-Za-z0-9]", password):
+        errors["password"] = "Add at least one symbol."
+
+    return {"username": username, "email": email, "password": password}, errors
+
+
+# --------------------------------------------------------------------------
+# Rate limiting (in memory, per IP)
+# --------------------------------------------------------------------------
+
+ATTEMPT_LIMIT = int(os.environ.get("NL_LOGIN_LIMIT", "12"))
+ATTEMPT_WINDOW = 60  # seconds
+
+
+def _limit(name, default):
+    """Rate limits can be tuned (or relaxed for a load test) from the env."""
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+class SlidingWindow:
+    """N hits per window, per key. Thread-safe, self-pruning."""
+
+    def __init__(self, limit, window, name=""):
+        self.limit = limit
+        self.window = window
+        self.name = name
+        self._hits = {}
+        self._lock = threading.Lock()
+
+    def hit(self, key) -> bool:
+        """Record one hit. True means the caller is now over the limit."""
+        if self.limit is None:
+            return False
+        now = time.time()
+        with self._lock:
+            hits = [t for t in self._hits.get(key, ()) if now - t < self.window]
+            hits.append(now)
+            self._hits[key] = hits
+            if len(self._hits) > 2048:
+                for dead in [
+                    k for k, v in self._hits.items() if not v or now - v[-1] > self.window * 4
+                ]:
+                    self._hits.pop(dead, None)
+            return len(hits) > self.limit
+
+    def reset(self, key):
+        with self._lock:
+            self._hits.pop(key, None)
+
+
+class Lockbox:
+    """Failed-password counter that locks an account for a growing period.
+
+    The IP limiter stops one host from hammering; this stops the same account
+    being sprayed from many hosts. Five wrong passwords lock the account for a
+    minute, ten for two, twenty for four — capped at an hour.
+    """
+
+    THRESHOLD = 5
+    BASE = 60
+    CAP = 3600
+    FORGET_AFTER = 3600
+
+    def __init__(self):
+        self._entries = {}
+        self._lock = threading.Lock()
+
+    def locked_for(self, key: str) -> int:
+        now = time.time()
+        with self._lock:
+            entry = self._entries.get(key)
+            if not entry:
+                return 0
+            return max(0, int(entry["until"] - now) + 1) if entry["until"] > now else 0
+
+    def fail(self, key: str) -> None:
+        now = time.time()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or now - entry["last"] > self.FORGET_AFTER:
+                entry = {"count": 0, "strikes": 0, "until": 0.0, "last": now}
+            entry["count"] += 1
+            entry["last"] = now
+            if entry["count"] % self.THRESHOLD == 0:
+                entry["strikes"] += 1
+                entry["until"] = now + min(self.BASE * (2 ** (entry["strikes"] - 1)), self.CAP)
+            self._entries[key] = entry
+            if len(self._entries) > 4096:
+                for dead in [
+                    k for k, v in self._entries.items() if now - v["last"] > self.FORGET_AFTER
+                ]:
+                    self._entries.pop(dead, None)
+
+    def forgive(self, key: str) -> None:
+        with self._lock:
+            self._entries.pop(key, None)
+
+
+# One limiter per kind of pressure, so a busy deposit page cannot lock people
+# out of signing in.
+login_throttle = SlidingWindow(_limit("NL_LOGIN_LIMIT", ATTEMPT_LIMIT), ATTEMPT_WINDOW, "login")
+signup_throttle = SlidingWindow(_limit("NL_SIGNUP_LIMIT", 6), 300, "signup")
+account_throttle = SlidingWindow(_limit("NL_ACCOUNT_LIMIT", 30), 300, "account")
+payment_throttle = SlidingWindow(_limit("NL_PAYMENT_LIMIT", 60), 300, "payments")
+purchase_throttle = SlidingWindow(_limit("NL_PURCHASE_LIMIT", 20), 60, "purchase")
+admin_throttle = SlidingWindow(_limit("NL_ADMIN_LIMIT", 120), 60, "admin")
+postcode_throttle = SlidingWindow(POSTCODE_LIMIT, 60, "postcode")
+login_failures = Lockbox()
+
+
+def too_many_lookups(ip: str) -> bool:
+    return postcode_throttle.hit(ip)
+
+
+# --------------------------------------------------------------------------
+# HTTP handler
+# --------------------------------------------------------------------------
+
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+BASE_CSP = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' https://challenges.cloudflare.com; "
+    "frame-src https://challenges.cloudflare.com; "
+    "connect-src 'self' https://challenges.cloudflare.com; "
+    "font-src 'self' data:; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'"
+)
+# the standalone preview files carry a small inline script of their own
+PREVIEW_CSP = BASE_CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+
+POST_ROUTES = {
+    "/api/signup": "api_signup",
+    "/api/login": "api_login",
+    "/api/logout": "api_logout",
+    "/api/account/email": "api_account_email",
+    "/api/account/password": "api_account_password",
+    "/api/forgot-password": "api_forgot_password",
+    "/api/reset-password": "api_reset_password",
+    "/api/payments": "api_create_payment",
+    "/api/payment-sent": "api_report_payment",
+    "/api/payment-cancel": "api_cancel_payment",
+    "/api/purchase": "api_purchase",
+    "/api/cheap-product-checkout": "api_cheap_product_checkout",
+    "/api/expensive-product-checkout": "api_expensive_product_checkout",
+    "/api/expensive-product-name": "api_expensive_product_name",
+    "/api/legitimate-product-checkout": "api_legitimate_product_checkout",
+    "/api/legitimate-product-name": "api_legitimate_product_name",
+    "/api/admin/payment": "api_admin_payment",
+    "/api/admin/expensive-products": "api_admin_expensive_products",
+    "/api/admin/expensive-products/import-draft": "api_admin_import_expensive_draft",
+    "/api/admin/expensive-products/drafts/repair-order": "api_admin_repair_expensive_draft_order",
+    "/api/admin/expensive-products/drafts/update": "api_admin_update_expensive_draft",
+    "/api/admin/expensive-products/drafts/publish": "api_admin_publish_expensive_drafts",
+    "/api/admin/expensive-products/update": "api_admin_update_expensive_product",
+    "/api/admin/expensive-products/delete": "api_admin_delete_expensive_product",
+    "/api/admin/legitimate-products": "api_admin_legitimate_products",
+    "/api/admin/legitimate-products/import": "api_admin_import_legitimate_products",
+    "/api/admin/legitimate-products/publish-import": "api_admin_publish_legitimate_import",
+    "/api/admin/legitimate-products/publish-all-drafts": "api_admin_publish_all_legitimate_drafts",
+}
+
+GET_ROUTES = (
+    "/api/me",
+    "/api/orders",
+    "/api/payments",
+    "/api/admin/data",
+    "/api/postcode",
+    "/api/bundles",
+    "/api/expensive-product-orders",
+    "/api/legitimate-product-orders",
+)
+
+page_throttle = SlidingWindow(_limit("NL_PAGE_LIMIT", 300), 60, "pages")  # per IP
+post_throttle = SlidingWindow(_limit("NL_POST_LIMIT", 60), 60, "posts")    # per IP
+
+
+def _no_constants(value):  # pragma: no cover - raised into json.loads
+    raise ValueError(f"{value} is not a number")
+
+
+class Handler(BaseHTTPRequestHandler):
+    # Do not advertise the interpreter version in the Server header.
+    server_version = "Northlight/2.0"
+    sys_version = ""
+    protocol_version = "HTTP/1.1"
+    timeout = REQUEST_TIMEOUT
+
+    def version_string(self):
+        return self.server_version
+
+    # ---------------- plumbing ----------------
+
+    def log_message(self, fmt, *args):  # quieter, single-line access log
+        print(f"  {self.address_string()} {fmt % args}")
+
+    def log_error(self, fmt, *args):
+        print(f"  ! {self.address_string()} {fmt % args}")
+
+    def _base_headers(self, csp=None):
+        policy = csp or BASE_CSP
+        headers = [
+            ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "no-referrer"),
+            ("X-Permitted-Cross-Domain-Policies", "none"),
+            ("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()"),
+        ]
+        if STRICT_HEADERS:
+            # off by default: the preview panel embeds these pages in an iframe
+            policy += "; frame-ancestors 'none'"
+            headers += [
+                ("X-Frame-Options", "DENY"),
+                ("Cross-Origin-Opener-Policy", "same-origin"),
+            ]
+        headers.append(("Content-Security-Policy", policy))
+        if HTTPS_ONLY:
+            headers.append(
+                ("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+            )
+        return headers
+
+    def _send(self, status, body=b"", content_type=None, extra_headers=None, csp=None):
+        self.send_response(status)
+        if content_type:
+            self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in self._base_headers(csp):
+            self.send_header(key, value)
+        for key, value in (extra_headers or []):
+            self.send_header(key, value)
+        self.end_headers()
+        self._responded = True
+        if body and self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _json(self, status, payload, extra_headers=None):
+        body = json.dumps(payload).encode("utf-8")
+        self._send(
+            status,
+            body,
+            "application/json; charset=utf-8",
+            [("Cache-Control", "no-store")] + (extra_headers or []),
+        )
+
+    def _error(self, status, message, **extra):
+        payload = {"error": message}
+        payload.update(extra)
+        self._json(status, payload)
+
+    def _redirect(self, location, extra_headers=None):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        for key, value in self._base_headers():
+            self.send_header(key, value)
+        for key, value in (extra_headers or []):
+            self.send_header(key, value)
+        self.end_headers()
+        self._responded = True
+
+    def _cookie_token(self):
+        raw = self.headers.get("Cookie", "")
+        for chunk in raw.split(";"):
+            name, _, value = chunk.strip().partition("=")
+            if name == SESSION_COOKIE:
+                return value
+        return ""
+
+    def _session_cookie(self, token, max_age=SESSION_TTL):
+        # max_age=None -> no Max-Age, so the cookie dies with the browser
+        # session ("remember me" switched off)
+        attrs = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax"
+        if max_age is not None:
+            attrs += f"; Max-Age={max_age}"
+        if HTTPS_ONLY:
+            attrs += "; Secure"
+        return ("Set-Cookie", attrs)
+
+    def _clear_cookie(self):
+        attrs = f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+        if HTTPS_ONLY:
+            attrs += "; Secure"
+        return ("Set-Cookie", attrs)
+
+    def send_error(self, code, message=None, explain=None):
+        """Malformed requests answer in the same shape as everything else,
+        and a client that hung up mid-request cannot spray tracebacks."""
+        try:
+            text = message or explain or "Bad request."
+            if (getattr(self, "path", "") or "").startswith("/api/"):
+                self._error(code, text)
+            else:
+                self._send(code, text.encode(), "text/plain; charset=utf-8")
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+        except Exception:
+            self.close_connection = True
+
+    # ---- request body: read it exactly, or hang up -----------------------
+
+    def _read_body(self):
+        """Returns (body, status). A refused body is still drained, so a
+        keep-alive connection can never desync into the next request."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.close_connection = True
+            return None, 400
+
+        if length < 0 or length > MAX_DRAIN:
+            self.close_connection = True
+            return None, 413
+
+        raw = b""
+        while len(raw) < length:
+            chunk = self.rfile.read(length - len(raw))
+            if not chunk:
+                self.close_connection = True
+                return None, 400
+            raw += chunk
+
+        if length > MAX_BODY:
+            return None, 413
+        return raw, None
+
+    def _read_json(self):
+        raw, status = self._read_body()
+        if status is not None:
+            return None, status
+        if not raw:
+            return None, 400
+        try:
+            payload = json.loads(raw.decode("utf-8"), parse_constant=_no_constants)
+        except (ValueError, UnicodeDecodeError):
+            return None, 400
+        if not isinstance(payload, dict):
+            return None, 400
+        return payload, None
+
+    # ---- cheap CSRF defence ---------------------------------------------
+
+    def _same_origin(self):
+        """Reject a state-changing request that says it came from elsewhere.
+
+        SameSite=Lax already stops other sites from sending the cookie on a
+        cross-site POST; this catches the cases where that is not enough
+        (a browser that ignores it, or a proxied deployment).
+        """
+        if not CHECK_ORIGIN:
+            return True
+
+        # Modern browsers state the relationship outright, and it stays true
+        # behind a proxy that rewrites Host, so it is the primary signal.
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if site:
+            return site in ("same-origin", "same-site", "none")
+
+        origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        if not origin:
+            return True  # curl, a script, or an old client
+
+        # No Sec-Fetch-Site (older browser): compare against every host name we
+        # were reached by, including the one a proxy forwarded.
+        allowed = {
+            (self.headers.get("Host") or "").lower(),
+            (self.headers.get("X-Forwarded-Host") or "").lower(),
+        }
+        allowed.discard("")
+        try:
+            parsed = urllib.parse.urlsplit(origin)
+        except ValueError:
+            return False
+        return bool(parsed.netloc) and parsed.netloc.lower() in allowed
+
+    # ---------------- routing ----------------
+
+    def _guard(self, work):
+        """Turn an unexpected failure into a 500 instead of a dropped socket."""
+        try:
+            work()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+        except Exception:
+            traceback.print_exc()
+            self.close_connection = True
+            if not getattr(self, "_responded", False):
+                try:
+                    self._error(500, "Something went wrong on the server.")
+                except Exception:
+                    pass
+
+    def do_GET(self):
+        self._guard(self._get)
+
+    def do_HEAD(self):
+        self._guard(self._get)
+
+    def do_POST(self):
+        self._guard(self._post)
+
+    def _not_allowed(self):
+        self._send(
+            405,
+            b"Method not allowed.",
+            "text/plain; charset=utf-8",
+            [("Allow", "GET, HEAD, POST")],
+        )
+
+    def do_PUT(self):
+        self._not_allowed()
+
+    def do_PATCH(self):
+        self._not_allowed()
+
+    def do_DELETE(self):
+        self._not_allowed()
+
+    def __getattr__(self, name):
+        # any other method the client tries: 405 rather than a 501 traceback
+        if name.startswith("do_"):
+            return self._not_allowed
+        raise AttributeError(name)
+
+    def _get(self):
+        path = self.path.split("?")[0]
+        if page_throttle.hit(self.client_address[0]):
+            return self._error(429, "Too many requests. Slow down.")
+
+        if path == "/api/me":
+            return self.api_me()
+        if path == "/api/public-config":
+            return self._json(200, {"turnstile_site_key": TURNSTILE_SITE_KEY})
+        if path == "/api/orders":
+            return self.api_orders()
+        if path == "/api/expensive-product-orders":
+            return self.api_expensive_product_orders()
+        if path == "/api/legitimate-product-orders":
+            return self.api_legitimate_product_orders()
+        if path == "/api/payments":
+            return self.api_my_payments()
+        if path == "/api/admin/data":
+            return self.api_admin_data()
+        if path == "/api/admin/expensive-products/drafts":
+            return self.api_admin_expensive_product_drafts()
+        if path == "/api/bundles":
+            return self.api_bundles()
+        if path == "/api/legitimate-products":
+            return self.api_legitimate_products()
+        if path == "/api/admin/legitimate-products":
+            return self.api_admin_legitimate_products_get()
+        if path == "/api/expensive-products":
+            return self.api_expensive_products()
+        if path == "/api/product-check":
+            return self.api_product_check()    
+        if path.startswith("/api/postcode"):
+            return self.api_postcode()
+        if path.startswith("/api/"):
+            return self._error(404, "Unknown endpoint.")
+        if path == "/api":
+            return self._error(404, "Unknown endpoint.")
+
+        return self.serve_static(path)
+
+    def _post(self, path=None):
+        path = (path or self.path).split("?")[0]
+        handler = POST_ROUTES.get(path)
+        if handler is None:
+            return self._error(404, "Unknown endpoint.")
+
+        ip = self.client_address[0]
+        if post_throttle.hit(ip):
+            return self._error(429, "Too many requests. Slow down.")
+        if not self._same_origin():
+            return self._error(403, "That request came from another site.")
+
+        if path == "/api/logout":
+            return self.api_logout()
+
+        # The password limiter only guards the endpoints that accept a
+        # password: changing your email or confirming a payment must not be
+        # throttled by a bot guessing credentials elsewhere.
+        if path == "/api/login" and login_throttle.hit(ip):
+            return self._error(429, "Too many attempts. Wait a minute and try again.")
+        if path == "/api/signup" and signup_throttle.hit(ip):
+            return self._error(429, "Too many sign-ups from here. Try again later.")
+
+        payload, status = self._read_json()
+        if status == 413:
+            return self._error(413, "That request is too large.")
+        if status is not None:
+            return self._error(400, "Expected a JSON body.")
+
+        return getattr(self, handler)(payload)
+
+    # ---------------- API ----------------
+
+    def _current_user(self):
+        token = self._cookie_token()
+        if not token:
+            return None
+        with db() as conn:
+            return user_for_token(conn, token)
+
+   
+    def api_signup(self, payload):
+        values, errors = validate_signup(payload)
+
+        if not verify_turnstile(
+            str(payload.get("turnstile_token", "")),
+            self.client_address[0]
+        ):
+            errors["captcha"] = "Human verification failed. Please try again."
+
+        if errors:
+            return self._json(
+                400, {"error": "Please fix the highlighted fields.", "fields": errors}
+            )
+
+        password_hash = hash_password(values["password"])
+        now = int(time.time())
+
+        try:
+            with db(write=True) as conn:
+                existing = conn.execute(
+                    "SELECT username, email FROM users WHERE username = ? OR email = ?",
+                    (values["username"], values["email"]),
+                ).fetchone()
+
+                if existing:
+                    if existing["username"].lower() == values["username"].lower():
+                        errors["username"] = "That username is taken."
+                    if existing["email"].lower() == values["email"].lower():
+                        errors["email"] = "That email is already registered."
+                    return self._json(
+                        409,
+                        {"error": "That account already exists.", "fields": errors},
+                    )
+
+                cursor = conn.execute(
+                    "INSERT INTO users (username, email, password_hash, created_at, balance_cents) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (values["username"], values["email"], password_hash, now, NEW_USER_CENTS),
+                )
+                user_id = cursor.lastrowid
+                token = new_session(conn, user_id)
+                audit(
+                    conn,
+                    "account.signup",
+                    actor={"id": user_id, "username": values["username"]},
+                    target=values["username"],
+                    detail=values["email"],
+                    ip=self.client_address[0],
+                )
+        except sqlite3.IntegrityError:
+            return self._json(
+                409,
+                {
+                    "error": "That account already exists.",
+                    "fields": {"username": "That username is taken."},
+                },
+            )
+
+        user = {
+            "id": user_id,
+            "username": values["username"],
+            "email": values["email"],
+            "created_at": now,
+            "role": "user",
+            "balance": dollars(NEW_USER_CENTS),
+        }
+        return self._json(201, {"user": user}, [self._session_cookie(token)])
+
+
+
+    def api_login(self, payload):
+        username = str(payload.get("username", "")).strip()
+        password = str(payload.get("password", ""))
+        ip = self.client_address[0]
+
+        if not username or not password:
+            return self._json(
+                400,
+                {
+                    "error": "Enter your username and password.",
+                    "fields": {
+                        **({"username": "Enter your username."} if not username else {}),
+                        **({"password": "Enter your password."} if not password else {}),
+                    },
+                },
+            )
+
+        if len(username) > 64 or len(password) > 1024:
+            return self._error(401, "Username or password is incorrect.")
+
+        account = username.lower()
+        wait = login_failures.locked_for(account)
+        if wait:
+            return self._json(
+                429,
+                {
+                    "error": (
+                        "Too many wrong passwords for that account. "
+                        f"Try again in {wait} seconds."
+                    )
+                },
+                [("Retry-After", str(wait))],
+            )
+
+        with db() as conn:
+            row = conn.execute(
+                "SELECT id, username, email, created_at, role, balance_cents, "
+                "password_hash FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+
+        # Verify against a dummy hash when the account is missing, so a probe
+        # cannot tell the two cases apart by how long the answer took.
+        stored = row["password_hash"] if row is not None else dummy_hash()
+        matches = verify_password(password, stored)
+
+        if row is None or not matches:
+            login_failures.fail(account)
+            with db(write=True) as conn:
+                audit(
+                    conn,
+                    "login.failed",
+                    target=username,
+                    detail="wrong username or password",
+                    ip=ip,
+                )
+            return self._json(401, {"error": "Username or password is incorrect."})
+
+        login_failures.forgive(account)
+
+        # "Remember me" keeps the cookie for 30 days; otherwise it is a
+        # session cookie that disappears when the browser closes, and the
+        # server-side session dies after 12 hours regardless.
+        remember = bool(payload.get("remember"))
+        ttl = SESSION_TTL if remember else 12 * 3600
+
+        with db(write=True) as conn:
+            token = new_session(conn, row["id"], ttl=ttl)
+            # occasionally clear out sessions that have expired, so the table
+            # cannot grow without bound on a busy shop
+            if int(time.time()) % 30 == 0:
+                prune_sessions(conn)
+            audit(
+                conn,
+                "login.ok",
+                actor={"id": row["id"], "username": row["username"]},
+                target=row["username"],
+                detail="remember me" if remember else "session cookie",
+                ip=ip,
+            )
+
+        user = {
+            "id": row["id"],
+            "username": row["username"],
+            "email": row["email"],
+            "created_at": row["created_at"],
+            "role": row["role"],
+            "balance": dollars(row["balance_cents"]),
+        }
+        cookie = self._session_cookie(token, SESSION_TTL if remember else None)
+
+        return self._json(200, {"user": user}, [cookie])
+
+    def api_logout(self):
+        token = self._cookie_token()
+        if token:
+            with db(write=True) as conn:
+                row = conn.execute(
+                    "SELECT u.id, u.username FROM sessions s "
+                    "JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+                    (token_hash(token),),
+                ).fetchone()
+                conn.execute(
+                    "DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),)
+                )
+                if row is not None:
+                    audit(
+                        conn,
+                        "logout",
+                        actor={"id": row["id"], "username": row["username"]},
+                        target=row["username"],
+                        ip=self.client_address[0],
+                    )
+        # 204 carries no body, only the cookie that drops the session
+        self._send(204, b"", None, [("Cache-Control", "no-store"), self._clear_cookie()])
+
+    def api_forgot_password(self, payload):
+        """Request a password-reset email. Always returns 200 to avoid email enumeration."""
+        email = str(payload.get("email", "")).strip().lower()
+        if not email or not EMAIL_RE.match(email):
+            return self._json(400, {"error": "Enter a valid email address."})
+
+        # Always show the same message so attackers cannot probe for accounts
+        success_msg = {
+            "ok": True,
+            "message": "If an account exists for that email, a reset link has been sent. Check your inbox.",
+        }
+
+        with db(write=True) as conn:
+            row = conn.execute(
+                "SELECT id, username, email FROM users WHERE email = ?",
+                (email,),
+            ).fetchone()
+            if row is None:
+                return self._json(200, success_msg)
+
+            raw_token = create_password_reset(conn, row["id"])
+            audit(
+                conn,
+                "account.forgot_password",
+                actor={"id": row["id"], "username": row["username"]},
+                target=row["email"],
+                ip=self.client_address[0],
+            )
+
+        # Build the reset link
+        base = PUBLIC_BASE_URL
+        if not base:
+            # Best-effort from the request Host header
+            host = self.headers.get("Host", "localhost:8000")
+            scheme = "https" if HTTPS_ONLY else "http"
+            base = f"{scheme}://{host}"
+        reset_url = f"{base}/reset-password.html?token={raw_token}"
+
+        html = f"""
+        <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2 style="color: #d81f30;">Reset your Northlight password</h2>
+          <p>Hi {row['username']},</p>
+          <p>We received a request to reset your password. Click the button below. This link expires in 1 hour.</p>
+          <p style="margin: 28px 0;">
+            <a href="{reset_url}"
+               style="background:#d81f30;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">
+              Reset password
+            </a>
+          </p>
+          <p style="color:#666;font-size:13px;">If you did not ask for this, you can ignore this email.</p>
+          <p style="color:#999;font-size:12px;word-break:break-all;">Or copy this link:<br>{reset_url}</p>
+        </div>
+        """
+
+        sent = send_email(row["email"], "Reset your Northlight password", html)
+        if not sent:
+            # Still return success to the user; log the failure for the operator
+            print(f"Failed to send reset email to {row['email']}")
+        return self._json(200, success_msg)
+
+    def api_reset_password(self, payload):
+        """Set a new password using a valid reset token."""
+        token = str(payload.get("token", "")).strip()
+        password = str(payload.get("password", ""))
+
+        if not token:
+            return self._json(400, {"error": "Missing reset token."})
+        if len(password) < MIN_PASSWORD:
+            return self._json(400, {"error": f"Use at least {MIN_PASSWORD} characters.", "fields": {"password": f"Use at least {MIN_PASSWORD} characters."}})
+        if not re.search(r"[A-Za-z]", password):
+            return self._json(400, {"error": "Add at least one letter.", "fields": {"password": "Add at least one letter."}})
+        if not re.search(r"\d", password):
+            return self._json(400, {"error": "Add at least one number.", "fields": {"password": "Add at least one number."}})
+        if not re.search(r"[^A-Za-z0-9]", password):
+            return self._json(400, {"error": "Add at least one symbol.", "fields": {"password": "Add at least one symbol."}})
+
+        token_hash_val = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            row = conn.execute(
+                "SELECT pr.user_id, pr.expires_at, pr.used_at, u.username "
+                "FROM password_resets pr JOIN users u ON u.id = pr.user_id "
+                "WHERE pr.token_hash = ?",
+                (token_hash_val,),
+            ).fetchone()
+
+            if row is None or row["used_at"] is not None or row["expires_at"] < now:
+                return self._json(400, {"error": "This reset link is invalid or has expired. Request a new one."})
+
+            new_hash = hash_password(password)
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_hash, row["user_id"]),
+            )
+            conn.execute(
+                "UPDATE password_resets SET used_at = ? WHERE token_hash = ?",
+                (now, token_hash_val),
+            )
+            # Drop all existing sessions so old devices are logged out
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+            audit(
+                conn,
+                "account.reset_password",
+                actor={"id": row["user_id"], "username": row["username"]},
+                target=row["username"],
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True, "message": "Password updated. You can sign in now."})
+
+    def api_postcode(self):
+        """Verify one ZIP / postal code through Geoapify, with a SQLite cache."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        query = urllib.parse.urlsplit(self.path).query
+        params = urllib.parse.parse_qs(query)
+        country = (params.get("country", [""])[0] or "").strip().upper()
+        code = " ".join((params.get("code", [""])[0] or "").split())
+
+        if not re.fullmatch(r"[A-Z]{2}", country):
+            return self._json(400, {"error": "country must be a 2-letter code."})
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 \-]{0,11}", code):
+            return self._json(400, {"error": "That does not look like a postal code."})
+
+        if too_many_lookups(self.client_address[0]):
+            return self._json(429, {"error": "Too many lookups. Wait a minute."})
+
+        now = int(time.time())
+        with db() as conn:
+            row = conn.execute(
+                "SELECT found, place, formatted, checked_at FROM postcodes "
+                "WHERE country = ? AND code = ?",
+                (country, code),
+            ).fetchone()
+
+        if row and now - (row["checked_at"] or 0) < POSTCODE_TTL:
+            if not row["found"]:
+                return self._json(404, {"country": country, "code": code, "verified": False})
+            return self._json(
+                200,
+                {
+                    "country": country,
+                    "code": code,
+                    "place": row["place"] or "",
+                    "formatted": row["formatted"] or "",
+                    "verified": True,
+                    "cached": True,
+                },
+            )
+
+        if not geoapify_key():
+            return self._json(503, {"error": "No Geoapify key configured on the server."})
+
+        found = look_up_postcode(country, code)
+
+        with db(write=True) as conn:
+            conn.execute(
+                "INSERT INTO postcodes (country, code, found, place, formatted, checked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(country, code) DO UPDATE SET found = excluded.found, "
+                "place = excluded.place, formatted = excluded.formatted, "
+                "checked_at = excluded.checked_at",
+                (
+                    country,
+                    code,
+                    1 if found else 0,
+                    (found or {}).get("place", ""),
+                    (found or {}).get("formatted", ""),
+                    now,
+                ),
+            )
+
+        if not found:
+            return self._json(404, {"country": country, "code": code, "verified": False})
+
+        return self._json(
+            200,
+            {
+                "country": country,
+                "code": code,
+                "place": found["place"],
+                "formatted": found["formatted"],
+                "verified": True,
+                "cached": False,
+            },
+        )
+
+    def api_account_email(self, payload):
+        """Change the address on the signed-in account."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."})
+        if account_throttle.hit(user["id"]):
+            return self._error(429, "Too many changes. Wait a few minutes.")
+
+        email = str(payload.get("email", "")).strip()
+        if not email:
+            return self._json(
+                400,
+                {
+                    "error": "Enter your email address.",
+                    "fields": {"email": "Enter your email address."},
+                },
+            )
+        if len(email) > 254 or not EMAIL_RE.match(email):
+            return self._json(
+                400,
+                {
+                    "error": "That email address looks off.",
+                    "fields": {"email": "That email address looks off."},
+                },
+            )
+
+        with db(write=True) as conn:
+            clash = conn.execute(
+                "SELECT id FROM users WHERE email = ? AND id <> ?",
+                (email, user["id"]),
+            ).fetchone()
+            if clash:
+                return self._json(
+                    409,
+                    {
+                        "error": "That email is already used by another account.",
+                        "fields": {
+                            "email": "That email is already used by another account."
+                        },
+                    },
+                )
+
+            conn.execute("UPDATE users SET email = ? WHERE id = ?", (email, user["id"]))
+            audit(
+                conn,
+                "account.email",
+                actor=user,
+                target=user["username"],
+                detail=f"{user['email']} -> {email}",
+                ip=self.client_address[0],
+            )
+
+        user["email"] = email
+        return self._json(200, {"user": user})
+
+    def api_account_password(self, payload):
+        """Change the password, proving the current one first."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."})
+        if account_throttle.hit(user["id"]):
+            return self._error(429, "Too many changes. Wait a few minutes.")
+
+        current = str(payload.get("current", ""))
+        password = str(payload.get("password", ""))
+
+        errors = {}
+        if not current:
+            errors["current"] = "Enter your current password."
+        if len(password) < MIN_PASSWORD:
+            errors["password"] = f"Use at least {MIN_PASSWORD} characters."
+        elif not re.search(r"[A-Za-z]", password):
+            errors["password"] = "Add at least one letter."
+        elif not re.search(r"\d", password):
+            errors["password"] = "Add at least one number."
+        elif not re.search(r"[^A-Za-z0-9]", password):
+            errors["password"] = "Add at least one symbol."
+        elif len(password) > 1024:
+            errors["password"] = "That password is too long."
+        elif current and password == current:
+            errors["password"] = "Pick a password you have not used here."
+
+        if errors:
+            return self._json(
+                400, {"error": "Please fix the highlighted fields.", "fields": errors}
+            )
+
+        with db() as conn:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE id = ?", (user["id"],)
+            ).fetchone()
+
+        if row is None:
+            return self._json(401, {"error": "Not signed in."})
+
+        if not verify_password(current, row["password_hash"]):
+            login_failures.fail(user["username"].lower())
+            return self._json(
+                400,
+                {
+                    "error": "That is not your current password.",
+                    "fields": {"current": "That is not your current password."},
+                },
+            )
+
+        login_failures.forgive(user["username"].lower())
+        new_hash = hash_password(password)  # slow: keep it outside the transaction
+        token = self._cookie_token()
+
+        with db(write=True) as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_hash, user["id"]),
+            )
+            # every other session for this account is signed out
+            conn.execute(
+                "DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?",
+                (user["id"], token_hash(token)),
+            )
+            audit(
+                conn,
+                "account.password",
+                actor=user,
+                target=user["username"],
+                detail="other sessions signed out",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True})
+
+    # ---------------- admin ----------------
+
+    def _require_admin(self):
+        """Returns the signed-in admin, or None."""
+        user = self._current_user()
+        if user is None or user.get("role") != "admin":
+            return None
+        return user
+
+    def api_admin_data(self):
+        """Everything the dashboard shows: totals, users, payment queue."""
+        if self._require_admin() is None:
+            return self._json(403, {"error": "Admins only."})
+
+        with db() as conn:
+            user_rows = conn.execute(
+                "SELECT id, username, email, created_at, role, balance_cents "
+                "FROM users ORDER BY id"
+            ).fetchall()
+            payment_rows = conn.execute(
+                "SELECT p.id, p.user_id, u.username, p.amount_cents, p.asset, "
+                "p.network, p.status, p.created_at, p.decided_at, p.decided_by "
+                "FROM payments p JOIN users u ON u.id = p.user_id "
+                "ORDER BY p.id DESC"
+            ).fetchall()
+
+            cheap_order_rows = conn.execute(
+                "SELECT o.id, o.user_id, u.username, o.total_cents, o.created_at "
+                "FROM cheap_product_orders o JOIN users u ON u.id = o.user_id "
+                "ORDER BY o.id DESC LIMIT 200"
+            ).fetchall()
+            cheap_item_rows = conn.execute(
+                "SELECT i.order_id, i.title, i.price_cents, i.quantity "
+                "FROM cheap_product_order_items i WHERE i.order_id IN ("
+                "SELECT id FROM cheap_product_orders ORDER BY id DESC LIMIT 200"
+                ") ORDER BY i.id"
+            ).fetchall()
+
+            expensive_order_rows = conn.execute(
+                "SELECT o.id, o.user_id, u.username, o.total_cents, "
+                "o.full_name, o.status, o.created_at "
+                "FROM expensive_product_orders o "
+                "JOIN users u ON u.id = o.user_id "
+                "ORDER BY o.id DESC LIMIT 200"
+            ).fetchall()
+
+            expensive_item_rows = conn.execute(
+                "SELECT i.order_id, i.title, i.price_cents, i.quantity "
+                "FROM expensive_product_order_items i "
+                "JOIN expensive_product_orders o ON o.id = i.order_id "
+                "WHERE o.id IN ("
+                "SELECT id FROM expensive_product_orders "
+                "ORDER BY id DESC LIMIT 200"
+                ") "
+                "ORDER BY i.id"
+            ).fetchall()
+
+            legitimate_order_rows = conn.execute(
+                "SELECT o.id, o.user_id, u.username, o.total_cents, "
+                "o.full_name, o.status, o.created_at "
+                "FROM legitimate_product_orders o "
+                "JOIN users u ON u.id = o.user_id "
+                "ORDER BY o.id DESC LIMIT 200"
+            ).fetchall()
+
+            legitimate_item_rows = conn.execute(
+                "SELECT i.order_id, i.title, i.price_cents, i.quantity "
+                "FROM legitimate_product_order_items i "
+                "JOIN legitimate_product_orders o ON o.id = i.order_id "
+                "WHERE o.id IN ("
+                "SELECT id FROM legitimate_product_orders "
+                "ORDER BY id DESC LIMIT 200"
+                ") "
+                "ORDER BY i.id"
+            ).fetchall()
+
+        cheap_items_by_order = {}
+        for item in cheap_item_rows:
+            cheap_items_by_order.setdefault(item["order_id"], []).append({
+                "title": item["title"], "price": dollars(item["price_cents"]),
+                "quantity": item["quantity"],
+            })
+        cheap_orders = []
+        for order in cheap_order_rows:
+            cheap_orders.append({
+                "id": order["id"], "user_id": order["user_id"],
+                "username": order["username"], "total": dollars(order["total_cents"]),
+                "status": "paid", "created_at": order["created_at"],
+                "items": cheap_items_by_order.get(order["id"], []),
+            })
+
+        expensive_items_by_order = {}
+
+        for item in expensive_item_rows:
+            expensive_items_by_order.setdefault(
+                item["order_id"], []
+            ).append({
+                "title": item["title"],
+                "price": dollars(item["price_cents"]),
+                "quantity": item["quantity"],
+            })
+
+        expensive_orders = []
+
+        for order in expensive_order_rows:
+            expensive_orders.append({
+                "id": order["id"],
+                "user_id": order["user_id"],
+                "username": order["username"],
+                "total": dollars(order["total_cents"]),
+                "full_name": order["full_name"],
+                "status": order["status"],
+                "created_at": order["created_at"],
+                "items": expensive_items_by_order.get(order["id"], []),
+            })
+
+        legitimate_items_by_order = {}
+        for item in legitimate_item_rows:
+            legitimate_items_by_order.setdefault(item["order_id"], []).append({
+                "title": item["title"],
+                "price": dollars(item["price_cents"]),
+                "quantity": item["quantity"],
+            })
+
+        legitimate_orders = []
+        for order in legitimate_order_rows:
+            legitimate_orders.append({
+                "id": order["id"],
+                "user_id": order["user_id"],
+                "username": order["username"],
+                "total": dollars(order["total_cents"]),
+                "full_name": order["full_name"],
+                "status": order["status"],
+                "created_at": order["created_at"],
+                "items": legitimate_items_by_order.get(order["id"], []),
+            })
+
+        users = []
+        for row in user_rows:
+            user = dict(row)
+            user["balance"] = dollars(user.pop("balance_cents"))
+            users.append(user)
+
+        payments = []
+        for row in payment_rows:
+            payment = dict(row)
+            payment["amount"] = dollars(payment.pop("amount_cents"))
+            payments.append(payment)
+
+        # per-user payment tallies
+        per_user = {}
+        for pay in payments:
+            tally = per_user.setdefault(
+                pay["user_id"],
+                {
+                    "awaiting_payment": 0,
+                    "pending": 0,
+                    "confirmed": 0,
+                    "failed": 0,
+                    "cancelled": 0,
+                },
+            )
+            tally[pay["status"]] = tally.get(pay["status"], 0) + 1
+        for user in users:
+            user["payments"] = per_user.get(
+                user["id"], {"pending": 0, "confirmed": 0, "failed": 0, "awaiting_payment": 0, "cancelled": 0,}
+            )
+            user["paid"] = user["payments"]["confirmed"] > 0
+
+        confirmed = [pay for pay in payments if pay["status"] == "confirmed"]
+        stats = {
+            "users": len([u for u in users if u["role"] != "admin"]),
+            "admins": len([u for u in users if u["role"] == "admin"]),
+            "payers": len([u for u in users if u["paid"]]),
+            "awaiting_payment": len([p for p in payments if p["status"] == "awaiting_payment"]),
+            "pending": len([p for p in payments if p["status"] == "pending"]),
+            "confirmed": len(confirmed),
+            "failed": len([p for p in payments if p["status"] == "failed"]),
+            "cancelled": len([p for p in payments if p["status"] == "cancelled"]),
+            "revenue": dollars(sum(int(round(p["amount"] * 100)) for p in confirmed)),
+        }
+
+        return self._json(200, {
+            "stats": stats,
+            "users": users,
+            "payments": payments,
+            "cheap_orders": cheap_orders,
+            "expensive_orders": expensive_orders,
+            "legitimate_orders": legitimate_orders,
+        })
+
+    def api_admin_payment(self, payload):
+        """Confirm or fail one pending payment. Confirming credits the wallet.
+
+        The decision is a single conditional UPDATE, so two admins clicking at
+        the same moment can only ever produce one winner — the money moves
+        once, inside the same transaction as the status change.
+        """
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        try:
+            payment_id = int(payload.get("id"))
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Which payment?"})
+
+        status = str(payload.get("status", "")).strip().lower()
+        if status not in ("confirmed", "failed"):
+            return self._json(400, {"error": "Status must be confirmed or failed."})
+
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            decided = conn.execute(
+                "UPDATE payments SET status = ?, decided_at = ?, decided_by = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (status, now, admin["id"], payment_id),
+            )
+
+            if decided.rowcount != 1:
+                row = conn.execute(
+                    "SELECT status FROM payments WHERE id = ?", (payment_id,)
+                ).fetchone()
+                if row is None:
+                    return self._json(404, {"error": "No such payment."})
+                return self._json(
+                    409, {"error": f"That payment is already {row['status']}."}
+                )
+
+            row = conn.execute(
+                "SELECT user_id, amount_cents FROM payments WHERE id = ?",
+                (payment_id,),
+            ).fetchone()
+
+            if status == "confirmed":
+                credited = conn.execute(
+                    "UPDATE users SET balance_cents = balance_cents + ? WHERE id = ?",
+                    (row["amount_cents"], row["user_id"]),
+                )
+                if credited.rowcount != 1:
+                    # the account vanished: undo the status change too
+                    raise sqlite3.IntegrityError(
+                        f"payment {payment_id} has no account to credit"
+                    )
+
+            audit(
+                conn,
+                f"payment.{status}",
+                actor=admin,
+                target=payment_id,
+                detail=(
+                    f"{dollars(row['amount_cents']):.2f} for user #{row['user_id']}"
+                    + (" (wallet credited)" if status == "confirmed" else " (no funds moved)")
+                ),
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True, "id": payment_id, "status": status})
+    
+    
+    def api_admin_expensive_products(self, payload):
+        """Create up to five legitimate digital products in one atomic batch."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        items = payload.get("products")
+        if not isinstance(items, list) or not 1 <= len(items) <= 5:
+            return self._json(
+                400, {"error": "Submit between one and five products."}
+            )
+
+        fields = {
+            "title": 190,
+            "creator": 100,
+            "category": 100,
+            "formats": 255,
+            "license": 190,
+            "refund_period": 64,
+            "blurb": 4000,
+        }
+
+        cleaned = []
+        errors = []
+
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                errors.append(f"Product {index}: invalid product data.")
+                continue
+
+            product = {}
+
+            for field, max_length in fields.items():
+                value = item.get(field)
+
+                if not isinstance(value, str):
+                    errors.append(f"Product {index}: {field} is required.")
+                    continue
+
+                value = value.strip()
+
+                if not value:
+                    errors.append(f"Product {index}: {field} is required.")
+                elif len(value) > max_length:
+                    errors.append(
+                        f"Product {index}: {field} must be "
+                        f"{max_length} characters or fewer."
+                    )
+                else:
+                    product[field] = value
+
+            country_code = item.get("country_code")
+
+            if not isinstance(country_code, str):
+                errors.append(
+                    f"Product {index}: intended country is required."
+                )
+            else:
+                country_code = country_code.strip().upper()
+
+                if (
+                    len(country_code) != 2
+                    or not country_code.isascii()
+                    or not country_code.isalpha()
+                ):
+                    errors.append(
+                        f"Product {index}: invalid country code."
+                    )
+                else:
+                    product["country_code"] = country_code
+
+            public_id = item.get("product_id")
+            if not isinstance(public_id, str):
+                errors.append(f"Product {index}: Product ID is required.")
+            else:
+                public_id = public_id.strip()
+                if not public_id:
+                    errors.append(f"Product {index}: Product ID is required.")
+                elif len(public_id) > 64:
+                    errors.append(f"Product {index}: Product ID must be 64 characters or fewer.")
+                else:
+                    product["product_id"] = public_id
+
+            expiry, expiry_error = parse_exp_date(item.get("expDate"))
+            if expiry_error:
+                errors.append(f"Product {index}: {expiry_error}")
+            else:
+                product["exp_date"] = expiry
+
+            cents, price_error = parse_cents(
+                item.get("price"), low=1, high=100000000
+            )
+
+            if price_error:
+                errors.append(f"Product {index}: {price_error}")
+            else:
+                product["price_cents"] = cents
+
+            cleaned.append(product)
+
+        if errors:
+            return self._json(
+                400,
+                {
+                    "error": "Some products are invalid.",
+                    "details": errors,
+                },
+            )
+
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            created_ids = []
+
+            for product in cleaned:
+                result = conn.execute(
+                    "INSERT INTO expensive_products "
+                    "(product_id, exp_date, title, creator, category, formats, license, "
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        product["product_id"],
+                        product["exp_date"],
+                        product["title"],
+                        product["creator"],
+                        product["category"],
+                        product["formats"],
+                        product["license"],
+                        product["refund_period"],
+                        product["country_code"],
+                        product["price_cents"],
+                        product["blurb"],
+                        now,
+                        admin["id"],
+                        _lagos_catalogue_date(),
+                    ),
+                )
+
+                created_ids.append(result.lastrowid)
+
+            audit(
+                conn,
+                "expensive_products.create",
+                actor=admin,
+                target=",".join(str(product_id) for product_id in created_ids),
+                detail=f"Created {len(created_ids)} expensive product(s).",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            201,
+            {"ok": True, "count": len(created_ids), "ids": created_ids},
+        )
+
+    
+
+    def api_admin_import_expensive_draft(self, payload):
+        """Atomically replace the public catalogue with 276 private editable drafts."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        source = WEB_ROOT / "database" / "inventory-draft.csv"
+        required_headers = [
+            "Product ID", "Product", "Category", "Intended Market", "Format",
+            "Creator", "Licence", "Expiry (MM/YYYY)", "Price (USD)", "Status",
+        ]
+        csv_text = payload.get("csv_text") if isinstance(payload, dict) else None
+        try:
+            if csv_text is not None:
+                if not isinstance(csv_text, str) or len(csv_text.encode("utf-8")) > 100000:
+                    return self._json(400, {"error": "The uploaded CSV is too large or invalid."})
+                reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff"), newline=""))
+                rows = list(reader)
+            else:
+                with source.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    rows = list(reader)
+            if reader.fieldnames != required_headers:
+                return self._json(400, {"error": "The draft CSV headers do not match the required template."})
+        except (OSError, csv.Error):
+            return self._error(400, "The draft inventory CSV could not be read.")
+
+        if len(rows) != 276:
+            return self._json(400, {
+                "error": "The draft inventory must contain exactly 276 rows.",
+                "found": len(rows),
+            })
+
+        cleaned = []
+        limits = {
+            "Product": 190, "Category": 100, "Intended Market": 100,
+            "Format": 255, "Creator": 100, "Licence": 190,
+            "Expiry (MM/YYYY)": 7, "Price (USD)": 32,
+        }
+        for index, row in enumerate(rows, start=1):
+            public_id = (row.get("Product ID") or "").strip()
+            status = (row.get("Status") or "Draft").strip().title()
+            # Same public Product ID may appear on multiple rows; each becomes
+            # its own draft / live product (different internal id).
+            if not re.fullmatch(r"[0-9]{1,64}", public_id) or status != "Draft":
+                return self._json(400, {
+                    "error": f"Draft row {index} must have a numeric Product ID and Status Draft."
+                })
+            values = {key: (row.get(key) or "").strip() for key in limits}
+            too_long = next((key for key, limit in limits.items() if len(values[key]) > limit), None)
+            if too_long:
+                return self._json(400, {"error": f"Draft row {index}: {too_long} is too long."})
+            expiry = values["Expiry (MM/YYYY)"]
+            if expiry and not re.fullmatch(r"(0[1-9]|1[0-2])/\d{4}", expiry):
+                return self._json(400, {"error": f"Draft row {index}: expiry must be MM/YYYY or blank."})
+            price = values["Price (USD)"]
+            if price:
+                cents, problem = parse_cents(price, low=1, high=100000000)
+                if problem or cents is None:
+                    return self._json(400, {"error": f"Draft row {index}: enter a valid USD price or leave it blank."})
+            cleaned.append({
+                "product_id": public_id,
+                "csv_position": index,
+                "title": values["Product"],
+                "category": values["Category"],
+                "intended_market": values["Intended Market"],
+                "formats": values["Format"],
+                "creator": values["Creator"],
+                "license": values["Licence"],
+                "expiry": expiry,
+                "price_usd": price,
+            })
+
+        now = int(time.time())
+        refund_assignments = _random_refund_periods(len(cleaned))
+        with db(write=True) as conn:
+            old_count = conn.execute(
+                "SELECT COUNT(*) AS total FROM expensive_products"
+            ).fetchone()["total"]
+
+            # Historical order rows retain their own title, price and quantity.
+            # Do not delete or rewrite users, balances, payments, orders or audit rows.
+            conn.execute("DELETE FROM expensive_products")
+            conn.execute("DELETE FROM expensive_product_drafts")
+            for draft, refund_period in zip(cleaned, refund_assignments):
+                country_code = _country_code_from_market(draft["intended_market"])
+                conn.execute(
+                    "INSERT INTO expensive_product_drafts "
+                    "(product_id, csv_position, title, category, intended_market, formats, creator, "
+                    "license, expiry, price_usd, status, created_at, updated_at, created_by, "
+                    "country_code, refund_period, blurb) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, 'Good')",
+                    (
+                        draft["product_id"], draft["csv_position"], draft["title"], draft["category"],
+                        draft["intended_market"], draft["formats"], draft["creator"],
+                        draft["license"], draft["expiry"], draft["price_usd"],
+                        now, now, admin["id"], country_code, refund_period,
+                    ),
+                )
+
+            audit(
+                conn,
+                "expensive_products.catalogue_replaced",
+                actor=admin,
+                target="inventory-draft.csv",
+                detail=f"Replaced {old_count} live products with {len(cleaned)} private draft rows.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {
+            "ok": True,
+            "drafts_created": len(cleaned),
+            "live_products_removed": old_count,
+            "customer_history_preserved": True,
+        })
+
+    def api_admin_expensive_product_drafts(self):
+        """Return the private draft catalogue to administrators only."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT product_id, title, category, intended_market, country_code, "
+                "formats, creator, license, expiry, price_usd, refund_period, blurb, "
+                "status, updated_at, csv_position FROM expensive_product_drafts ORDER BY csv_position ASC"
+            ).fetchall()
+        return self._json(200, {
+            "drafts": [dict(row) for row in rows],
+            "count": len(rows),
+            "expected_count": 276,
+        })
+
+    def api_admin_repair_expensive_draft_order(self, payload):
+        """Repair only csv_position after validating an exact match to all private drafts."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        csv_text = payload.get("csv_text") if isinstance(payload, dict) else None
+        if not isinstance(csv_text, str) or len(csv_text.encode("utf-8")) > 100000:
+            return self._json(400, {"error": "The CSV is too large or invalid."})
+
+        required_headers = [
+            "Product ID", "Product", "Category", "Intended Market", "Format",
+            "Creator", "Licence", "Expiry (MM/YYYY)", "Price (USD)", "Status",
+        ]
+        try:
+            reader = csv.DictReader(io.StringIO(csv_text.lstrip(chr(65279)), newline=""))
+            rows = list(reader)
+            headers = reader.fieldnames
+            if headers and headers[0] == "index":
+                headers = headers[1:]
+                for row in rows:
+                    row.pop("index", None)
+            if headers != required_headers:
+                return self._json(400, {"error": "The CSV headers do not match the expected inventory template."})
+        except csv.Error:
+            return self._error(400, "The CSV could not be read.")
+
+        if len(rows) != 276:
+            return self._json(400, {"error": "The ordering CSV must contain exactly 276 rows.", "found": len(rows)})
+
+        ordered_ids = []
+        for position, row in enumerate(rows, start=1):
+            product_id = str(row.get("Product ID") or "").strip()
+            status = str(row.get("Status") or "Draft").strip().title()
+            # Duplicates are allowed; each row still maps to its own draft row.
+            if not re.fullmatch(r"[0-9]{1,64}", product_id) or status != "Draft":
+                return self._json(400, {"error": f"CSV row {position} must contain a numeric Product ID and Status Draft."})
+            ordered_ids.append(product_id)
+
+        with db(write=True) as conn:
+            draft_rows = conn.execute(
+                "SELECT product_id FROM expensive_product_drafts"
+            ).fetchall()
+            if len(draft_rows) != 276:
+                return self._json(409, {
+                    "error": "Expected exactly 276 saved drafts. Nothing was changed.",
+                    "draft_count": len(draft_rows),
+                })
+
+            # When the same public Product ID appears more than once we still
+            # walk the CSV in order and assign positions sequentially. The
+            # UPDATE matches by product_id, so all rows sharing an ID receive
+            # the last position that was assigned for that ID (acceptable
+            # because the primary ordering is csv_position after publish).
+            for position, product_id in enumerate(ordered_ids, start=1):
+                conn.execute(
+                    "UPDATE expensive_product_drafts SET csv_position = ? WHERE product_id = ?",
+                    (position, product_id),
+                )
+            audit(
+                conn, "expensive_products.draft_order_repaired", actor=admin,
+                target="inventory-draft-final.csv",
+                detail="Repaired csv_position for existing drafts (duplicate Product IDs allowed).",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {
+            "ok": True,
+            "updated": len(ordered_ids),
+            "first_product_ids": ordered_ids[:3],
+            "only_csv_position_changed": True,
+        })
+
+    def api_admin_update_expensive_draft(self, payload):
+        """Save edits to one private draft without publishing it."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        product_id = str(payload.get("product_id") or "").strip()
+        if not re.fullmatch(r"[0-9]{1,64}", product_id):
+            return self._json(400, {"error": "Product ID must remain numeric."})
+
+        fields = {
+            "title": 190, "category": 100, "intended_market": 100,
+            "formats": 255, "creator": 100, "license": 190,
+            "expiry": 7, "price_usd": 32,
+        }
+        values = {}
+        for field, limit in fields.items():
+            value = payload.get(field, "")
+            if not isinstance(value, str):
+                return self._json(400, {"error": field.replace("_", " ").title() + " must be text."})
+            value = value.strip()
+            if len(value) > limit:
+                return self._json(400, {"error": field.replace("_", " ").title() + " is too long."})
+            values[field] = value
+
+        expiry = values["expiry"]
+        if expiry and not re.fullmatch(r"(0[1-9]|1[0-2])/\d{4}", expiry):
+            return self._json(400, {"error": "Expiry must use MM/YYYY or be left blank."})
+        price = values["price_usd"]
+        if price:
+            cents, problem = parse_cents(price, low=1, high=100000000)
+            if problem:
+                return self._json(400, {"error": "Enter a valid USD price or leave it blank."})
+
+        country_code = str(payload.get("country_code") or "").strip().upper()
+        valid_codes = _country_catalogue()
+        if country_code and country_code not in valid_codes:
+            return self._json(400, {"error": "Select a valid country from the list."})
+        if not country_code:
+            country_code = _country_code_from_market(values["intended_market"])
+
+        refund_period = str(payload.get("refund_period") or "").strip()
+        if refund_period not in ("0", "3"):
+            return self._json(400, {"error": "Refund period must be 0 or 3."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM expensive_product_drafts WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()
+            if existing is None:
+                return self._json(404, {"error": "Draft product not found."})
+            conn.execute(
+                "UPDATE expensive_product_drafts SET title = ?, category = ?, "
+                "intended_market = ?, formats = ?, creator = ?, license = ?, "
+                "expiry = ?, price_usd = ?, country_code = ?, refund_period = ?, "
+                "blurb = 'Good', updated_at = ? WHERE product_id = ?",
+                (
+                    values["title"], values["category"], values["intended_market"],
+                    values["formats"], values["creator"], values["license"],
+                    expiry, price, country_code, refund_period, now, product_id,
+                ),
+            )
+            audit(
+                conn, "expensive_products.draft_update", actor=admin,
+                target=product_id, detail="Updated a private premium product draft.",
+                ip=self.client_address[0],
+            )
+        return self._json(200, {"ok": True, "product_id": product_id})
+
+    def api_admin_publish_expensive_drafts(self, payload):
+        """Validate and atomically publish all 276 private drafts."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+        if not isinstance(payload, dict) or payload.get("confirm") is not True:
+            return self._json(400, {"error": "Confirm publication before continuing."})
+
+        errors = []
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT product_id, csv_position, title, category, intended_market, country_code, "
+                "formats, creator, license, expiry, price_usd, refund_period "
+                "FROM expensive_product_drafts ORDER BY csv_position ASC"
+            ).fetchall()
+            if len(rows) != 276:
+                return self._json(400, {
+                    "error": "The draft catalogue must contain exactly 276 products.",
+                    "found": len(rows),
+                })
+
+            valid_codes = _country_catalogue()
+            cleaned = []
+            for row in rows:
+                label = "Draft " + str(row["product_id"])
+                public_id = str(row["product_id"] or "").strip()
+                # Allow the same public Product ID on multiple products.
+                # Each row still becomes its own catalogue entry (different internal id).
+                if not re.fullmatch(r"[0-9]{1,64}", public_id):
+                    errors.append(label + ": invalid numeric Product ID.")
+                product = {"product_id": public_id, "csv_position": int(row["csv_position"] or 0)}
+                for field, label_name in (
+                    ("title", "Product"), ("category", "Category"),
+                    ("intended_market", "Intended Market"), ("formats", "Format"),
+                    ("creator", "Creator"), ("license", "Licence"),
+                ):
+                    value = str(row[field] or "").strip()
+                    if not value:
+                        errors.append(label + ": " + label_name + " is required.")
+                    product[field] = value
+
+                country_code = str(row["country_code"] or "").strip().upper()
+                if not country_code:
+                    country_code = _country_code_from_market(row["intended_market"])
+                if country_code not in valid_codes:
+                    errors.append(label + ": Intended Market could not be matched to a country. Edit this draft and select its country.")
+                product["country_code"] = country_code
+
+                exp_date, exp_error = parse_exp_date(str(row["expiry"] or ""))
+                if exp_error:
+                    errors.append(label + ": " + exp_error)
+                product["exp_date"] = exp_date
+
+                cents, price_error = parse_cents(row["price_usd"], low=1, high=100000000)
+                if price_error:
+                    errors.append(label + ": Price (USD) is missing or invalid.")
+                product["price_cents"] = cents
+
+                refund_period = str(row["refund_period"] or "").strip()
+                if refund_period not in ("0", "3"):
+                    errors.append(label + ": Refund period must be 0 or 3.")
+                product["refund_period"] = refund_period
+                cleaned.append(product)
+
+            if errors:
+                return self._json(400, {
+                    "error": "The catalogue is not ready to publish. Fix the listed drafts first.",
+                    "details": errors[:40],
+                    "error_count": len(errors),
+                })
+
+            # Intentionally allow the same public Product ID on multiple live products.
+            # Each published row gets its own auto-increment id and stands as a
+            # separate product; nothing is overwritten.
+
+            now = int(time.time())
+            for product in cleaned:
+                conn.execute(
+                    "INSERT INTO expensive_products "
+                    "(product_id, csv_position, exp_date, title, creator, category, formats, license, "
+                    "refund_period, country_code, price_cents, blurb, created_at, created_by, catalogue_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Good', ?, ?, ?)",
+                    (
+                        product["product_id"], product["csv_position"], product["exp_date"], product["title"],
+                        product["creator"], product["category"], product["formats"],
+                        product["license"], product["refund_period"], product["country_code"],
+                        product["price_cents"], now, admin["id"], _lagos_catalogue_date(),
+                    ),
+                )
+
+            conn.execute("DELETE FROM expensive_product_drafts")
+            audit(
+                conn, "expensive_products.drafts_published", actor=admin,
+                target="276 products",
+                detail="Published all 276 validated premium product drafts.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {
+            "ok": True, "published": len(cleaned),
+            "customer_history_preserved": True,
+        })
+
+    def api_admin_update_expensive_product(self, payload):
+        """Update one existing legitimate digital product."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        try:
+            product_id = int(payload.get("id"))
+            if product_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid product ID."})
+
+        fields = {
+            "title": 190,
+            "creator": 100,
+            "category": 100,
+            "formats": 255,
+            "license": 190,
+            "refund_period": 64,
+            "blurb": 4000,
+        }
+
+        product = {}
+        errors = []
+
+        for field, max_length in fields.items():
+            value = payload.get(field)
+
+            if not isinstance(value, str):
+                errors.append(f"{field} is required.")
+                continue
+
+            value = value.strip()
+
+            if not value:
+                errors.append(f"{field} is required.")
+            elif len(value) > max_length:
+                errors.append(
+                    f"{field} must be {max_length} characters or fewer."
+                )
+            else:
+                product[field] = value
+
+        country_code = payload.get("country_code")
+
+        if not isinstance(country_code, str):
+            errors.append("Intended country is required.")
+        else:
+            country_code = country_code.strip().upper()
+
+            if (
+                len(country_code) != 2
+                or not country_code.isascii()
+                or not country_code.isalpha()
+            ):
+                errors.append("Invalid country code.")
+            else:
+                product["country_code"] = country_code
+
+        public_id = payload.get("product_id")
+        if not isinstance(public_id, str):
+            errors.append("Product ID is required.")
+        else:
+            public_id = public_id.strip()
+            if not public_id:
+                errors.append("Product ID is required.")
+            elif len(public_id) > 64:
+                errors.append("Product ID must be 64 characters or fewer.")
+            else:
+                product["product_id"] = public_id
+
+        expiry, expiry_error = parse_exp_date(payload.get("expDate"))
+        if expiry_error:
+            errors.append(expiry_error)
+        else:
+            product["exp_date"] = expiry
+
+        cents, price_error = parse_cents(
+            payload.get("price"), low=1, high=100000000
+        )
+
+        if price_error:
+            errors.append(price_error)
+        else:
+            product["price_cents"] = cents
+
+        if errors:
+            return self._json(
+                400,
+                {
+                    "error": "Please correct the product details.",
+                    "details": errors,
+                },
+            )
+
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT id FROM expensive_products WHERE id = ?",
+                (product_id,),
+            ).fetchone()
+
+            if existing is None:
+                return self._json(404, {"error": "Product not found."})
+
+            conn.execute(
+                "UPDATE expensive_products SET "
+                "product_id = ?, exp_date = ?, "
+                "title = ?, creator = ?, category = ?, formats = ?, "
+                "license = ?, refund_period = ?, country_code = ?, "
+                "price_cents = ?, blurb = ? "
+                "WHERE id = ?",
+                (
+                    product["product_id"],
+                    product["exp_date"],
+                    product["title"],
+                    product["creator"],
+                    product["category"],
+                    product["formats"],
+                    product["license"],
+                    product["refund_period"],
+                    product["country_code"],
+                    product["price_cents"],
+                    product["blurb"],
+                    product_id,
+                ),
+            )
+
+            audit(
+                conn,
+                "expensive_products.update",
+                actor=admin,
+                target=product_id,
+                detail=f"Updated expensive product #{product_id}.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200, {"ok": True, "id": product_id}
+        )
+
+    
+    def api_admin_delete_expensive_product(self, payload):
+        """Delete one existing legitimate digital product."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        if admin_throttle.hit(admin["id"]):
+            return self._error(429, "Slow down for a moment.")
+
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "Invalid request."})
+
+        try:
+            product_id = int(payload.get("id"))
+            if product_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid product ID."})
+
+        with db(write=True) as conn:
+            existing = conn.execute(
+                "SELECT id, title FROM expensive_products WHERE id = ?",
+                (product_id,),
+            ).fetchone()
+
+            if existing is None:
+                return self._json(404, {"error": "Product not found."})
+
+            conn.execute(
+                "DELETE FROM expensive_products WHERE id = ?",
+                (product_id,),
+            )
+
+            audit(
+                conn,
+                "expensive_products.delete",
+                actor=admin,
+                target=product_id,
+                detail=f"Deleted expensive product #{product_id}: "
+                       f"{existing['title']}.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(200, {"ok": True, "id": product_id})
+    
+
+    def api_my_payments(self):
+        """The signed-in visitor's own deposits, newest first."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, amount_cents, asset, network, status, created_at, decided_at "
+                "FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 25",
+                (user["id"],),
+            ).fetchall()
+
+        return self._json(
+            200,
+            {
+                "payments": [
+                    {
+                        "id": row["id"],
+                        "amount": dollars(row["amount_cents"]),
+                        "asset": row["asset"],
+                        "network": row["network"],
+                        "status": row["status"],
+                        "created_at": row["created_at"],
+                        "decided_at": row["decided_at"],
+                    }
+                    for row in rows
+                ]
+            },
+        )
+
+    
+   
+    def api_create_payment(self, payload):
+        """Create a pending deposit with a server-calculated crypto quote."""
+        user = self._current_user()
+        if user is None:
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
+        if payment_throttle.hit(user["id"]):
+            return self._error(
+                429, "Too many deposit requests. Wait a few minutes."
+            )
+
+        cents, problem = parse_cents(
+            payload.get("amount"), low=2500, high=8000000
+        )
+
+        if problem in (
+            "That is below the minimum.",
+            "That is above the maximum.",
+        ):
+            return self._json(
+                400, {"error": "Deposits run from $25 to $80,000."}
+            )
+
+        if cents is None or problem:
+            return self._json(
+                400, {"error": problem or "Enter an amount."}
+            )
+
+        asset = str(payload.get("asset") or "").strip().upper()
+        network = str(payload.get("network") or "").strip()
+
+        supported = {
+            ("BTC", "Bitcoin"): {"fee_cents": 0, "decimals": 8},
+            ("ETH", "Ethereum"): {"fee_cents": 0, "decimals": 6},
+            ("LTC", "Litecoin"): {"fee_cents": 0, "decimals": 6},
+            ("SOL", "Solana"): {"fee_cents": 0, "decimals": 9},
+            ("USDT", "TRC-20"): {"fee_cents": 1000, "decimals": 2},
+            ("USDT", "BEP-20"): {"fee_cents": 1000, "decimals": 2},
+        }
+
+        option = supported.get((asset, network))
+        if option is None:
+            return self._json(
+                400, {"error": "Unsupported asset or network."}
+            )
+
+        request_id = str(
+            payload.get("request_id") or ""
+        ).strip()[:64]
+
+        if request_id and not re.fullmatch(
+            r"[A-Za-z0-9_-]{8,64}", request_id
+        ):
+            request_id = ""
+
+        def payment_response(row, replayed=False):
+            payment = {
+                "id": row["id"],
+                "amount": dollars(row["amount_cents"]),
+                "asset": row["asset"],
+                "network": row["network"],
+                "status": row["status"],
+                "network_fee": dollars(
+                    row["network_fee_cents"] or 0
+                ),
+                "send_amount": dollars(
+                    row["send_amount_cents"] or 0
+                ),
+                "quoted_rate": (
+                    str(row["quoted_rate"])
+                    if row["quoted_rate"] is not None
+                    else None
+                ),
+                "crypto_amount": (
+                    str(row["crypto_amount"])
+                    if row["crypto_amount"] is not None
+                    else None
+                ),
+                "quote_expires_at": row["quote_expires_at"],
+            }
+
+            result = {"payment": payment}
+
+            if replayed:
+                result["replayed"] = True
+
+            return result
+
+        # First check: reuse an existing request if its details match.
+        if request_id:
+            with db() as conn:
+                existing = conn.execute(
+                    "SELECT id, amount_cents, asset, network, status, "
+                    "network_fee_cents, send_amount_cents, quoted_rate, "
+                    "crypto_amount, quote_expires_at "
+                    "FROM payments WHERE user_id = ? AND request_id = ?",
+                    (user["id"], request_id),
+                ).fetchone()
+
+            if existing is not None:
+                if (
+                    int(existing["amount_cents"]) != cents
+                    or existing["asset"] != asset
+                    or existing["network"] != network
+                ):
+                    return self._json(
+                        409,
+                        {
+                            "error": (
+                                "This request ID was already used for a "
+                                "different deposit. Start a new deposit."
+                            )
+                        },
+                    )
+
+                return self._json(
+                    200, payment_response(existing, replayed=True)
+                )
+
+        # Get the exchange rate from the server.
+        try:
+            prices = get_crypto_prices()
+
+            rate = prices[asset].quantize(
+                Decimal("0.0000000001"),
+                rounding=ROUND_HALF_UP,
+            )
+
+            if rate <= 0:
+                raise RuntimeError("Invalid exchange rate.")
+
+        except Exception:
+            return self._json(
+                503,
+                {
+                    "error": (
+                        "Live crypto prices are temporarily unavailable. "
+                        "Please try again."
+                    )
+                },
+            )
+
+        fee_cents = option["fee_cents"]
+        send_cents = cents + fee_cents
+
+        send_usd = Decimal(send_cents) / Decimal(100)
+        quantum = Decimal(1).scaleb(-option["decimals"])
+
+        crypto_amount = (send_usd / rate).quantize(
+            quantum,
+            rounding=ROUND_UP,
+        )
+
+        now = int(time.time())
+        quote_expires_at = now + 600
+
+        # Second check and deposit creation happen in one transaction.
+        with db(write=True) as conn:
+
+            if request_id:
+                existing = conn.execute(
+                    "SELECT id, amount_cents, asset, network, status, "
+                    "network_fee_cents, send_amount_cents, quoted_rate, "
+                    "crypto_amount, quote_expires_at "
+                    "FROM payments WHERE user_id = ? AND request_id = ?",
+                    (user["id"], request_id),
+                ).fetchone()
+
+                if existing is not None:
+                    if (
+                        int(existing["amount_cents"]) != cents
+                        or existing["asset"] != asset
+                        or existing["network"] != network
+                    ):
+                        return self._json(
+                            409,
+                            {
+                                "error": (
+                                    "This request ID was already used for a "
+                                    "different deposit. Start a new deposit."
+                                )
+                            },
+                        )
+
+                    return self._json(
+                        200, payment_response(existing, replayed=True)
+                    )
+
+            waiting = conn.execute(
+                "SELECT COUNT(*) AS n FROM payments "
+                "WHERE user_id = ? "
+                "AND status IN ('awaiting_payment', 'pending')",
+                (user["id"],),
+            ).fetchone()["n"]
+
+            if waiting >= 20:
+                return self._json(
+                    429,
+                    {
+                        "error": (
+                            "You already have 20 deposits waiting for review. "
+                            "Wait for those to be decided first."
+                        )
+                    },
+                )
+
+            cursor = conn.execute(
+                "INSERT INTO payments "
+                "(user_id, amount_cents, asset, network, status, request_id, "
+                "created_at, quoted_rate, crypto_amount, quote_expires_at, "
+                "network_fee_cents, send_amount_cents) "
+                "VALUES (?, ?, ?, ?, 'awaiting_payment', ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user["id"],
+                    cents,
+                    asset,
+                    network,
+                    request_id or None,
+                    now,
+                    str(rate),
+                    str(crypto_amount),
+                    quote_expires_at,
+                    fee_cents,
+                    send_cents,
+                ),
+            )
+
+            payment_id = cursor.lastrowid
+
+            audit(
+                conn,
+                "payment.create",
+                actor=user,
+                target=payment_id,
+                detail=(
+                    f"{dollars(cents):.2f} USD credit; "
+                    f"{dollars(send_cents):.2f} USD send value; "
+                    f"{crypto_amount} {asset} / {network}"
+                ),
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            201,
+            {
+                "payment": {
+                    "id": payment_id,
+                    "amount": dollars(cents),
+                    "asset": asset,
+                    "network": network,
+                    "status": "awaiting_payment",
+                    "network_fee": dollars(fee_cents),
+                    "send_amount": dollars(send_cents),
+                    "quoted_rate": str(rate),
+                    "crypto_amount": str(crypto_amount),
+                    "quote_expires_at": quote_expires_at,
+                }
+            },
+        )
+
+
+    
+    def api_cancel_payment(self, payload):
+        """Cancel a customer's deposit that is still awaiting payment."""
+        user = self._current_user()
+        if user is None:
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
+        if payment_throttle.hit(user["id"]):
+            return self._error(429, "Too many payment requests. Please wait.")
+
+        try:
+            payment_id = int(payload.get("id"))
+            if payment_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid payment ID."})
+
+        with db(write=True) as conn:
+            payment = conn.execute(
+                "SELECT id, status FROM payments "
+                "WHERE id = ? AND user_id = ?",
+                (payment_id, user["id"]),
+            ).fetchone()
+
+            if payment is None:
+                return self._json(404, {"error": "Deposit not found."})
+
+            if payment["status"] == "cancelled":
+                return self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "id": payment_id,
+                        "status": "cancelled",
+                        "already_cancelled": True,
+                    },
+                )
+
+            if payment["status"] != "awaiting_payment":
+                return self._json(
+                    409,
+                    {"error": "Only deposits awaiting payment can be cancelled."},
+                )
+
+            updated = conn.execute(
+                "UPDATE payments SET status = 'cancelled' "
+                "WHERE id = ? AND user_id = ? "
+                "AND status = 'awaiting_payment'",
+                (payment_id, user["id"]),
+            )
+
+            if updated.rowcount != 1:
+                return self._json(
+                    409, {"error": "This deposit has already changed."}
+                )
+
+            audit(
+                conn,
+                "payment.cancelled",
+                actor=user,
+                target=payment_id,
+                detail="Customer cancelled deposit before reporting payment.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200,
+            {"ok": True, "id": payment_id, "status": "cancelled"},
+        )
+
+
+    def api_report_payment(self, payload):
+        """Move the customer's own deposit into the admin verification queue."""
+        user = self._current_user()
+        if user is None:
+            return self._json(
+                401, {"error": "Not signed in."}, [self._clear_cookie()]
+            )
+
+        if payment_throttle.hit(user["id"]):
+            return self._error(429, "Too many payment requests. Please wait.")
+
+        try:
+            payment_id = int(payload.get("id"))
+            if payment_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid payment ID."})
+
+        with db(write=True) as conn:
+            payment = conn.execute(
+                "SELECT id, status FROM payments "
+                "WHERE id = ? AND user_id = ?",
+                (payment_id, user["id"]),
+            ).fetchone()
+
+            if payment is None:
+                return self._json(404, {"error": "Deposit not found."})
+
+            if payment["status"] == "pending":
+                return self._json(
+                    200,
+                    {"ok": True, "id": payment_id, "status": "pending",
+                     "already_reported": True},
+                )
+
+            if payment["status"] != "awaiting_payment":
+                return self._json(
+                    409,
+                    {"error": "This deposit can no longer be reported."},
+                )
+
+            updated = conn.execute(
+                "UPDATE payments SET status = 'pending' "
+                "WHERE id = ? AND user_id = ? AND status = 'awaiting_payment'",
+                (payment_id, user["id"]),
+            )
+
+            if updated.rowcount != 1:
+                return self._json(
+                    409, {"error": "This deposit has already changed."}
+                )
+
+            audit(
+                conn,
+                "payment.reported",
+                actor=user,
+                target=payment_id,
+                detail="Customer reported sending cryptocurrency; awaiting verification.",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            200,
+            {"ok": True, "id": payment_id, "status": "pending"},
+        )        
+
+
+    def api_bundles(self):
+        """The ids of the bundles, in page order.
+
+        The page already has the names and prices (assets/data/bundles-data.js);
+        this hands it the matching catalogue ids, so the browser never has to
+        repeat the id arithmetic and a Buy Now click can only name a real item.
+        """
+        drops = len(catalogue_rows())
+        bundles = len(bundle_rows())
+        if not bundles:
+            return self._json(200, {"ids": [], "count": 0})
+        ids = catalogue_ids(drops + bundles)[drops:]
+        return self._json(200, {"ids": ids, "count": len(ids)})
+
+
+    def api_product_check(self):
+        """Check whether a public product ID is currently listed for sale."""
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        product_id = str((params.get("id") or [""])[0]).strip().upper()
+        if not product_id or len(product_id) > 64 or not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]*", product_id):
+            return self._json(400, {"error": "Enter a valid product ID."})
+
+        # Standard goods share the exact ID catalogue used by checkout.
+        cheap = goods_catalogue().get(product_id)
+        if cheap is not None:
+            return self._json(200, {
+                "found": True, "available": True,
+                "product": {"product_id": product_id, "title": cheap["title"], "type": "Standard product"}
+            })
+
+        # Premium goods use their public product_id, not the internal database ID.
+        with db() as conn:
+            row = conn.execute(
+                "SELECT product_id, title, category FROM expensive_products "
+                "WHERE UPPER(product_id) = ? LIMIT 1",
+                (product_id,),
+            ).fetchone()
+        if row is not None:
+            return self._json(200, {
+                "found": True, "available": True,
+                "product": {"product_id": row["product_id"], "title": row["title"],
+                            "category": row["category"], "type": "Premium product"}
+            })
+        return self._json(404, {"found": False, "available": False,
+                                "error": "This product ID is not currently listed for purchase."})
+
+    def api_expensive_products(self):
+        """Return a filtered, paginated public catalogue."""
+        params = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        def val(name, default=""):
+            return (params.get(name) or [default])[0].strip()
+        try:
+            page = max(1, int(val("page", "1"))); limit = min(100, max(1, int(val("per_page", "20"))))
+        except ValueError: return self._error(400, "Invalid catalogue page.")
+        clauses, args = [], []
+        q = val("q").lower()
+        if q:
+            clauses.append("(LOWER(title) LIKE ? OR LOWER(product_id) LIKE ? OR LOWER(category) LIKE ? OR LOWER(formats) LIKE ? OR LOWER(license) LIKE ? OR LOWER(blurb) LIKE ?)"); args.extend(["%" + q + "%"] * 6)
+        for key, col in (("category", "category"), ("country", "country_code")):
+            v = val(key)
+            if v: clauses.append(col + " = ?"); args.append(v)
+        for key, op in (("min", ">="), ("max", "<=")):
+            v = val(key)
+            if v:
+                try: cents = int((Decimal(v) * 100).quantize(Decimal("1")))
+                except (InvalidOperation, ValueError): return self._error(400, "Invalid price filter.")
+                clauses.append("price_cents " + op + " ?"); args.append(cents)
+        if val("refund") == "yes": clauses.append("CAST(refund_period AS DECIMAL(10,2)) > 0")
+        elif val("refund") == "no": clauses.append("CAST(refund_period AS DECIMAL(10,2)) <= 0")
+        expiry = val("expiry")
+        if re.fullmatch(r"\d{2}/\d{4}", expiry):
+            mm, yyyy = expiry.split("/"); clauses.append("substr(exp_date, 6, 2) = ? AND substr(exp_date, 1, 4) = ?"); args.extend([mm, yyyy])
+        fmt = val("format").lower()
+        if fmt: clauses.append("LOWER(formats) LIKE ?"); args.append("%" + fmt + "%")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        order = "csv_position ASC, id ASC"
+        if val("sort") == "low-high": order = "price_cents ASC, csv_position ASC, id ASC"
+        elif val("sort") == "high-low": order = "price_cents DESC, csv_position ASC, id ASC"
+        with db() as conn:
+            total = conn.execute("SELECT COUNT(*) AS total FROM expensive_products" + where, tuple(args)).fetchone()["total"]
+            rows = conn.execute("SELECT id, product_id, csv_position, exp_date, title, creator, category, formats, license, refund_period, country_code, price_cents, blurb, created_at, catalogue_date FROM expensive_products" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", tuple(args + [limit, (page - 1) * limit])).fetchall()
+            cats = conn.execute("SELECT DISTINCT category FROM expensive_products WHERE category <> '' ORDER BY category").fetchall()
+            countries = conn.execute("SELECT DISTINCT country_code FROM expensive_products WHERE country_code IS NOT NULL AND country_code <> '' ORDER BY country_code").fetchall()
+            expiry_rows = conn.execute("SELECT DISTINCT exp_date FROM expensive_products WHERE exp_date IS NOT NULL AND exp_date <> '' ORDER BY exp_date").fetchall()
+            format_rows = conn.execute("SELECT formats FROM expensive_products WHERE formats <> ''").fetchall()
+        products = []
+        for row in rows:
+            product = dict(row); product["price"] = dollars(product.pop("price_cents")); product["expDate"] = display_exp_date(product.pop("exp_date", None))
+            if hasattr(product.get("catalogue_date"), "isoformat"):
+                product["catalogue_date"] = product["catalogue_date"].isoformat()
+            products.append(product)
+        formats = sorted({part.strip() for row in format_rows for part in re.split(r"[,;|]", row["formats"] or "") if part.strip()}, key=str.lower)
+        return self._json(200, {"products": products, "total": total, "page": page, "per_page": limit, "facets": {"categories": [x["category"] for x in cats], "countries": [x["country_code"] for x in countries], "expiries": [display_exp_date(x["exp_date"]) for x in expiry_rows if x["exp_date"]], "formats": formats}})
+    def api_orders(self):
+        """The signed-in account's purchases, newest first."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, goods_id, title, price_cents, created_at "
+                "FROM purchases WHERE user_id = ? ORDER BY id DESC LIMIT 100",
+                (user["id"],),
+            ).fetchall()
+
+        return self._json(
+            200,
+            {
+                "orders": [
+                    {
+                        "id": row["id"],
+                        "goods_id": row["goods_id"],
+                        "title": row["title"],
+                        "price": dollars(row["price_cents"]),
+                        "created_at": row["created_at"],
+                    }
+                    for row in rows
+                ],
+                "balance": user["balance"],
+            },
+        )
+
+    def api_purchase(self, payload):
+        """Buy one catalogue item with the wallet balance.
+
+        The price comes from the catalogue on this side of the wire, never from
+        the request, and the debit is a single conditional UPDATE — so two
+        clicks cannot spend the same money twice and a balance can never go
+        below zero.
+        """
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+
+        goods_id = str(payload.get("id") or "").strip()
+        item = goods_catalogue().get(goods_id)
+
+        print("PURCHASE DEBUG:", goods_id, item, flush=True)
+        print("PURCHASE DEBUG:")
+        print("Received ID:", goods_id, "Matched item:", item)
+
+
+        if item is None:
+            return self._json(404, {"error": "That item is no longer in the catalogue."})
+
+        price = item["price_cents"]
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (price, user["id"], price),
+            )
+
+            if paid.rowcount != 1:
+                row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
+                balance = row["balance_cents"] if row is not None else 0
+                return self._json(
+                    402,
+                    {
+                        "error": "Insufficient funds.",
+                        "balance": dollars(balance),
+                        "price": dollars(price),
+                        "missing": dollars(max(0, price - balance)),
+                    },
+                )
+
+            cursor = conn.execute(
+                "INSERT INTO purchases (user_id, goods_id, title, price_cents, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user["id"], goods_id, item["title"], price, now),
+            )
+            purchase_id = cursor.lastrowid
+
+            balance = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+            ).fetchone()["balance_cents"]
+
+            audit(
+                conn,
+                "purchase",
+                actor=user,
+                target=goods_id,
+                detail=f"{item['title']} for {dollars(price):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(
+            201,
+            {
+                "purchase": {
+                    "id": purchase_id,
+                    "goods_id": goods_id,
+                    "title": item["title"],
+                    "price": dollars(price),
+                    "created_at": now,
+                },
+                "balance": dollars(balance),
+            },
+        )
+
+
+    def api_cheap_product_checkout(self, payload):
+        """Atomically charge the wallet and create a retry-safe multi-item order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+
+        request_key = str(payload.get("request_key") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{32}", request_key):
+            return self._json(400, {"error": "Invalid checkout request. Refresh the cart and try again."})
+        submitted = payload.get("items")
+        if not isinstance(submitted, list) or not submitted or len(submitted) > 30:
+            return self._json(400, {"error": "Your cart is empty or contains too many different products."})
+
+        catalogue = goods_catalogue()
+        quantities = {}
+        for entry in submitted:
+            if not isinstance(entry, dict):
+                return self._json(400, {"error": "One of the cart items is invalid."})
+            goods_id = str(entry.get("id") or "").strip()
+            quantity = entry.get("quantity", 1)
+            if (not goods_id or isinstance(quantity, bool) or not isinstance(quantity, int)
+                    or quantity < 1 or quantity > 99):
+                return self._json(400, {"error": "A cart item has an invalid quantity or product ID."})
+            if goods_id not in catalogue:
+                return self._json(409, {"error": "A product in your cart is no longer available. Remove it and refresh the catalogue."})
+            quantities[goods_id] = quantities.get(goods_id, 0) + quantity
+            if quantities[goods_id] > 99:
+                return self._json(400, {"error": "A product quantity cannot exceed 99."})
+
+        items, total_cents = [], 0
+        for goods_id, quantity in quantities.items():
+            product = catalogue[goods_id]
+            items.append({
+                "goods_id": goods_id, "title": product["title"],
+                "price_cents": product["price_cents"], "quantity": quantity,
+            })
+            total_cents += product["price_cents"] * quantity
+        if total_cents <= 0:
+            return self._json(400, {"error": "The checkout total is invalid."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            # A lost response can be retried with the same key without a second debit.
+            previous = conn.execute(
+                "SELECT id, total_cents, created_at FROM cheap_product_orders "
+                "WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone()
+            if previous is not None:
+                previous_items = conn.execute(
+                    "SELECT goods_id, title, price_cents, quantity "
+                    "FROM cheap_product_order_items WHERE order_id = ? ORDER BY id",
+                    (previous["id"],),
+                ).fetchall()
+                # Compare the cart identity, not today's catalogue price:
+                # a price edit after a successful but unacknowledged payment must
+                # not prevent the customer from retrieving the original receipt.
+                expected = sorted((x["goods_id"], x["quantity"]) for x in items)
+                actual = sorted((x["goods_id"], x["quantity"]) for x in previous_items)
+                if expected != actual:
+                    return self._json(409, {"error": "This checkout request was already used for a different cart. Refresh and try again."})
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
+                return self._json(200, {
+                    "duplicate": True,
+                    "balance": dollars(balance_row["balance_cents"] if balance_row else 0),
+                    "order": {
+                        "id": previous["id"], "total": dollars(previous["total_cents"]),
+                        "created_at": previous["created_at"], "status": "paid",
+                        "items": [{
+                            "goods_id": x["goods_id"], "title": x["title"],
+                            "price": dollars(x["price_cents"]), "quantity": x["quantity"],
+                        } for x in previous_items],
+                    },
+                })
+
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (total_cents, user["id"], total_cents),
+            )
+            if paid.rowcount != 1:
+                row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
+                balance = row["balance_cents"] if row is not None else 0
+                return self._json(402, {
+                    "error": "Insufficient funds.", "balance": dollars(balance),
+                    "total": dollars(total_cents),
+                    "missing": dollars(max(0, total_cents - balance)),
+                })
+
+            cursor = conn.execute(
+                "INSERT INTO cheap_product_orders "
+                "(user_id, request_key, total_cents, created_at) VALUES (?, ?, ?, ?)",
+                (user["id"], request_key, total_cents, now),
+            )
+            order_id = cursor.lastrowid
+            for item in items:
+                conn.execute(
+                    "INSERT INTO cheap_product_order_items "
+                    "(order_id, goods_id, title, price_cents, quantity) VALUES (?, ?, ?, ?, ?)",
+                    (order_id, item["goods_id"], item["title"], item["price_cents"], item["quantity"]),
+                )
+            balance_row = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?", (user["id"],)
+            ).fetchone()
+            balance = balance_row["balance_cents"] if balance_row is not None else 0
+            audit(
+                conn, "cheap_purchase", actor=user, target=str(order_id),
+                detail=f"{len(items)} product line(s), total {dollars(total_cents):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(201, {
+            "order": {
+                "id": order_id, "total": dollars(total_cents),
+                "created_at": now, "status": "paid",
+                "items": [{
+                    "goods_id": item["goods_id"], "title": item["title"],
+                    "price": dollars(item["price_cents"]), "quantity": item["quantity"],
+                } for item in items],
+            },
+            "balance": dollars(balance),
+        })
+
+    def api_expensive_product_checkout(self, payload):
+        """Charge the wallet and create an order for legitimate digital products."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+        
+        request_key = str(payload.get("request_key") or "").strip()
+        if not re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+            request_key,
+        ):
+            return self._json(400, {"error": "Invalid request key."})
+
+        items = payload.get("items")
+
+        
+        if not isinstance(items, list) or not items or len(items) > 50:
+            return self._json(400, {"error": "Invalid order items."})
+
+        quantities = {}
+        for item in items:
+            if not isinstance(item, dict):
+                return self._json(400, {"error": "Invalid order item."})
+
+            raw_product_id = item.get("product_id")
+            raw_quantity = item.get("quantity", 1)
+
+            if (
+                isinstance(raw_product_id, bool)
+                or isinstance(raw_quantity, bool)
+                or not isinstance(raw_product_id, int)
+                or not isinstance(raw_quantity, int)
+            ):
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            product_id = raw_product_id
+            quantity = raw_quantity
+
+            if product_id <= 0 or quantity < 1 or quantity > 20:
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            if product_id in quantities:
+                return self._json(400, {"error": "Duplicate products are not allowed."})
+
+            quantities[product_id] = quantity
+
+        product_ids = list(quantities)
+        placeholders = ",".join("?" for _ in product_ids)
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            # Lock this customer's wallet row until the transaction finishes.
+            if DB_KIND == "mysql":
+                conn.execute(
+                    "SELECT id FROM users WHERE id = ? FOR UPDATE",
+                    (user["id"],),
+                ).fetchone()
+
+            existing = conn.execute(
+                "SELECT id, total_cents, status, created_at "
+                "FROM expensive_product_orders "
+                "WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone()
+
+            if existing is not None:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+
+                return self._json(200, {
+                    "success": True,
+                    "duplicate": True,
+                    "order_id": existing["id"],
+                    "total": dollars(existing["total_cents"]),
+                    "status": existing["status"],
+                    "balance": dollars(balance_row["balance_cents"]),
+                })
+
+            products = conn.execute(
+                "SELECT id, title, price_cents FROM expensive_products "
+                f"WHERE id IN ({placeholders})",
+                tuple(product_ids),
+            ).fetchall()
+
+            product_map = {row["id"]: row for row in products}
+
+            if len(product_map) != len(product_ids):
+                return self._json(404, {
+                    "error": "One or more products are no longer available."
+                })
+
+            total_cents = 0
+            order_items = []
+
+            for product_id, quantity in quantities.items():
+                product = product_map[product_id]
+                price_cents = int(product["price_cents"])
+
+                if price_cents <= 0:
+                    return self._json(400, {"error": "Invalid product price."})
+
+                line_total = price_cents * quantity
+
+                if (
+                    line_total > 9_000_000_000_000_000
+                    or total_cents > 9_000_000_000_000_000 - line_total
+                ):
+                    return self._json(400, {"error": "Order total is too large."})
+
+                total_cents += line_total
+                order_items.append((
+                    product_id,
+                    product["title"],
+                    price_cents,
+                    quantity,
+                ))
+
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (total_cents, user["id"], total_cents),
+            )
+
+            if paid.rowcount != 1:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+                balance = balance_row["balance_cents"] if balance_row else 0
+
+                return self._json(402, {
+                    "error": "Insufficient funds.",
+                    "balance": dollars(balance),
+                    "total": dollars(total_cents),
+                    "missing": dollars(max(0, total_cents - balance)),
+                })
+
+            cursor = conn.execute(
+                "INSERT INTO expensive_product_orders "
+                "(user_id, request_key, total_cents, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    user["id"],
+                    request_key,
+                    total_cents,
+                    "awaiting_customer_name",
+                    now,
+                ),
+            )
+            order_id = cursor.lastrowid
+
+            for product_id, title, price_cents, quantity in order_items:
+                conn.execute(
+                    "INSERT INTO expensive_product_order_items "
+                    "(order_id, product_id, title, price_cents, quantity) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (order_id, product_id, title, price_cents, quantity),
+                )
+
+            balance_row = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?",
+                (user["id"],),
+            ).fetchone()
+            balance = balance_row["balance_cents"]
+
+            audit(
+                conn,
+                "expensive_product_checkout",
+                actor=user,
+                target=str(order_id),
+                detail=f"Order {order_id}: {dollars(total_cents):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(201, {
+            "success": True,
+            "order_id": order_id,
+            "total": dollars(total_cents),
+            "balance": dollars(balance),
+            "status": "awaiting_customer_name",
+        })
+
+    
+    def api_expensive_product_name(self, payload):
+        """Save the customer's name against a paid digital-product order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        raw_order_id = payload.get("order_id")
+        raw_full_name = payload.get("full_name")
+
+        if (
+            isinstance(raw_order_id, bool)
+            or not isinstance(raw_order_id, int)
+            or raw_order_id <= 0
+            or not isinstance(raw_full_name, str)
+        ):
+            return self._json(400, {"error": "Please enter a valid order and full name."})
+
+        order_id = raw_order_id
+        full_name = raw_full_name.strip()
+
+        if (
+            len(full_name) < 2
+            or len(full_name) > 190
+            or any(ord(char) < 32 for char in full_name)
+        ):
+            return self._json(400, {"error": "Please enter a valid full name."})
+
+        with db(write=True) as conn:
+            order = conn.execute(
+                "SELECT id, status, full_name FROM expensive_product_orders "
+                "WHERE id = ? AND user_id = ?",
+                (order_id, user["id"]),
+            ).fetchone()
+
+            if order is None:
+                return self._json(404, {"error": "Order not found."})
+
+            if order["status"] == "awaiting_customer_name":
+                conn.execute(
+                    "UPDATE expensive_product_orders "
+                    "SET full_name = ?, status = 'awaiting_fulfilment' "
+                    "WHERE id = ? AND user_id = ? "
+                    "AND status = 'awaiting_customer_name'",
+                    (full_name, order_id, user["id"]),
+                )
+
+                audit(
+                    conn,
+                    "expensive_product_customer_name",
+                    actor=user,
+                    target=str(order_id),
+                    detail="Customer name saved for order",
+                    ip=self.client_address[0],
+                )
+
+            elif order["full_name"] != full_name:
+                return self._json(409, {
+                    "error": "A name has already been submitted for this order."
+                })
+
+        return self._json(200, {
+            "success": True,
+            "message": "Your name has been saved. Please contact Northlight Support to receive your goods.",
+            "status": (
+                "awaiting_fulfilment"
+                if order["status"] == "awaiting_customer_name"
+                else order["status"]
+            ),
+        })
+
+    
+    def api_expensive_product_orders(self):
+        """Return the signed-in customer's legitimate digital-product orders."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, total_cents, full_name, status, created_at "
+                "FROM expensive_product_orders "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT 100",
+                (user["id"],),
+            ).fetchall()
+
+            orders = []
+            if rows:
+                order_ids = [row["id"] for row in rows]
+                placeholders = ",".join("?" for _ in order_ids)
+
+                item_rows = conn.execute(
+                    "SELECT order_id, product_id, title, price_cents, quantity "
+                    "FROM expensive_product_order_items "
+                    f"WHERE order_id IN ({placeholders}) ORDER BY id",
+                    tuple(order_ids),
+                ).fetchall()
+
+                items_by_order = {}
+                for item in item_rows:
+                    items_by_order.setdefault(item["order_id"], []).append({
+                        "product_id": item["product_id"],
+                        "title": item["title"],
+                        "price": dollars(item["price_cents"]),
+                        "quantity": item["quantity"],
+                    })
+
+                for row in rows:
+                    orders.append({
+                        "id": row["id"],
+                        "total": dollars(row["total_cents"]),
+                        "full_name": row["full_name"],
+                        "status": row["status"],
+                        "created_at": row["created_at"],
+                        "items": items_by_order.get(row["id"], []),
+                    })
+
+        return self._json(200, {"orders": orders})
+    
+    
+    
+    def api_legitimate_product_checkout(self, payload):
+        """Charge the wallet and create an isolated legitimate-catalogue order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        if purchase_throttle.hit(user["id"]):
+            return self._error(429, "Too many purchases. Wait a minute.")
+        
+        request_key = str(payload.get("request_key") or "").strip()
+        if not re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+            request_key,
+        ):
+            return self._json(400, {"error": "Invalid request key."})
+
+        items = payload.get("items")
+
+        
+        if not isinstance(items, list) or not items or len(items) > 50:
+            return self._json(400, {"error": "Invalid order items."})
+
+        quantities = {}
+        for item in items:
+            if not isinstance(item, dict):
+                return self._json(400, {"error": "Invalid order item."})
+
+            raw_product_id = item.get("product_id")
+            raw_quantity = item.get("quantity", 1)
+
+            if (
+                isinstance(raw_product_id, bool)
+                or isinstance(raw_quantity, bool)
+                or not isinstance(raw_product_id, int)
+                or not isinstance(raw_quantity, int)
+            ):
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            product_id = raw_product_id
+            quantity = raw_quantity
+
+            if product_id <= 0 or quantity < 1 or quantity > 20:
+                return self._json(400, {"error": "Invalid product or quantity."})
+
+            if product_id in quantities:
+                return self._json(400, {"error": "Duplicate products are not allowed."})
+
+            quantities[product_id] = quantity
+
+        product_ids = list(quantities)
+        placeholders = ",".join("?" for _ in product_ids)
+        now = int(time.time())
+
+        with db(write=True) as conn:
+            # Lock this customer's wallet row until the transaction finishes.
+            if DB_KIND == "mysql":
+                conn.execute(
+                    "SELECT id FROM users WHERE id = ? FOR UPDATE",
+                    (user["id"],),
+                ).fetchone()
+
+            existing = conn.execute(
+                "SELECT id, total_cents, status, created_at "
+                "FROM legitimate_product_orders "
+                "WHERE user_id = ? AND request_key = ?",
+                (user["id"], request_key),
+            ).fetchone()
+
+            if existing is not None:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+
+                return self._json(200, {
+                    "success": True,
+                    "duplicate": True,
+                    "order_id": existing["id"],
+                    "total": dollars(existing["total_cents"]),
+                    "status": existing["status"],
+                    "balance": dollars(balance_row["balance_cents"]),
+                })
+
+            products = conn.execute(
+                "SELECT id, name AS title, price_cents FROM legitimate_products "
+                f"WHERE status = 'published' AND id IN ({placeholders})",
+                tuple(product_ids),
+            ).fetchall()
+
+            product_map = {row["id"]: row for row in products}
+
+            if len(product_map) != len(product_ids):
+                return self._json(404, {
+                    "error": "One or more products are no longer available."
+                })
+
+            total_cents = 0
+            order_items = []
+
+            for product_id, quantity in quantities.items():
+                product = product_map[product_id]
+                price_cents = int(product["price_cents"])
+
+                if price_cents <= 0:
+                    return self._json(400, {"error": "Invalid product price."})
+
+                line_total = price_cents * quantity
+
+                if (
+                    line_total > 9_000_000_000_000_000
+                    or total_cents > 9_000_000_000_000_000 - line_total
+                ):
+                    return self._json(400, {"error": "Order total is too large."})
+
+                total_cents += line_total
+                order_items.append((
+                    product_id,
+                    product["title"],
+                    price_cents,
+                    quantity,
+                ))
+
+            paid = conn.execute(
+                "UPDATE users SET balance_cents = balance_cents - ? "
+                "WHERE id = ? AND balance_cents >= ?",
+                (total_cents, user["id"], total_cents),
+            )
+
+            if paid.rowcount != 1:
+                balance_row = conn.execute(
+                    "SELECT balance_cents FROM users WHERE id = ?",
+                    (user["id"],),
+                ).fetchone()
+                balance = balance_row["balance_cents"] if balance_row else 0
+
+                return self._json(402, {
+                    "error": "Insufficient funds.",
+                    "balance": dollars(balance),
+                    "total": dollars(total_cents),
+                    "missing": dollars(max(0, total_cents - balance)),
+                })
+
+            cursor = conn.execute(
+                "INSERT INTO legitimate_product_orders "
+                "(user_id, request_key, total_cents, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    user["id"],
+                    request_key,
+                    total_cents,
+                    "awaiting_customer_name",
+                    now,
+                ),
+            )
+            order_id = cursor.lastrowid
+
+            for product_id, title, price_cents, quantity in order_items:
+                conn.execute(
+                    "INSERT INTO legitimate_product_order_items "
+                    "(order_id, product_id, title, price_cents, quantity) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (order_id, product_id, title, price_cents, quantity),
+                )
+
+            balance_row = conn.execute(
+                "SELECT balance_cents FROM users WHERE id = ?",
+                (user["id"],),
+            ).fetchone()
+            balance = balance_row["balance_cents"]
+
+            audit(
+                conn,
+                "legitimate_product_checkout",
+                actor=user,
+                target=str(order_id),
+                detail=f"Order {order_id}: {dollars(total_cents):.2f}",
+                ip=self.client_address[0],
+            )
+
+        return self._json(201, {
+            "success": True,
+            "order_id": order_id,
+            "total": dollars(total_cents),
+            "balance": dollars(balance),
+            "status": "awaiting_customer_name",
+        })
+
+    
+    def api_legitimate_product_name(self, payload):
+        """Save the customer's name against a paid legitimate-catalogue order."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        raw_order_id = payload.get("order_id")
+        raw_full_name = payload.get("full_name")
+
+        if (
+            isinstance(raw_order_id, bool)
+            or not isinstance(raw_order_id, int)
+            or raw_order_id <= 0
+            or not isinstance(raw_full_name, str)
+        ):
+            return self._json(400, {"error": "Please enter a valid order and full name."})
+
+        order_id = raw_order_id
+        full_name = raw_full_name.strip()
+
+        if (
+            len(full_name) < 2
+            or len(full_name) > 190
+            or any(ord(char) < 32 for char in full_name)
+        ):
+            return self._json(400, {"error": "Please enter a valid full name."})
+
+        with db(write=True) as conn:
+            order = conn.execute(
+                "SELECT id, status, full_name FROM legitimate_product_orders "
+                "WHERE id = ? AND user_id = ?",
+                (order_id, user["id"]),
+            ).fetchone()
+
+            if order is None:
+                return self._json(404, {"error": "Order not found."})
+
+            if order["status"] == "awaiting_customer_name":
+                conn.execute(
+                    "UPDATE legitimate_product_orders "
+                    "SET full_name = ?, status = 'awaiting_fulfilment' "
+                    "WHERE id = ? AND user_id = ? "
+                    "AND status = 'awaiting_customer_name'",
+                    (full_name, order_id, user["id"]),
+                )
+
+                audit(
+                    conn,
+                    "legitimate_product_customer_name",
+                    actor=user,
+                    target=str(order_id),
+                    detail="Customer name saved for order",
+                    ip=self.client_address[0],
+                )
+
+            elif order["full_name"] != full_name:
+                return self._json(409, {
+                    "error": "A name has already been submitted for this order."
+                })
+
+        return self._json(200, {
+            "success": True,
+            "message": "Your name has been saved. Please contact Northlight Support to receive your goods.",
+            "status": (
+                "awaiting_fulfilment"
+                if order["status"] == "awaiting_customer_name"
+                else order["status"]
+            ),
+        })
+
+    
+    def api_legitimate_product_orders(self):
+        """Return the signed-in customer's legitimate catalogue orders."""
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, total_cents, full_name, status, created_at "
+                "FROM legitimate_product_orders "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT 100",
+                (user["id"],),
+            ).fetchall()
+
+            orders = []
+            if rows:
+                order_ids = [row["id"] for row in rows]
+                placeholders = ",".join("?" for _ in order_ids)
+
+                item_rows = conn.execute(
+                    "SELECT order_id, product_id, title, price_cents, quantity "
+                    "FROM legitimate_product_order_items "
+                    f"WHERE order_id IN ({placeholders}) ORDER BY id",
+                    tuple(order_ids),
+                ).fetchall()
+
+                items_by_order = {}
+                for item in item_rows:
+                    items_by_order.setdefault(item["order_id"], []).append({
+                        "product_id": item["product_id"],
+                        "title": item["title"],
+                        "price": dollars(item["price_cents"]),
+                        "quantity": item["quantity"],
+                    })
+
+                for row in rows:
+                    orders.append({
+                        "id": row["id"],
+                        "total": dollars(row["total_cents"]),
+                        "full_name": row["full_name"],
+                        "status": row["status"],
+                        "created_at": row["created_at"],
+                        "items": items_by_order.get(row["id"], []),
+                    })
+
+        return self._json(200, {"orders": orders})
+    
+    
+    
+    def api_me(self):
+        user = self._current_user()
+        if user is None:
+            return self._json(401, {"error": "Not signed in."}, [self._clear_cookie()])
+        return self._json(200, {"user": user})
+
+
+    # -------- isolated legitimate-products catalogue (no checkout/wallet) --------
+
+    @staticmethod
+    def _legitimate_product_payload(row):
+        return {
+            "id": row["id"], "name": row["name"], "description": row["description"],
+            "format": row["format"], "seller": row["seller"], "quality": row["quality"],
+            "product_code": row["product_code"], "expiry": row["expiry"],
+            "market": row["market"], "state": row["state"],
+            "address": ", ".join(part for part in (row["market"], row["state"]) if part),
+            "intended_country": row["intended_country"], "refund_period": int(row["refund_period"]),
+            "price": round(int(row["price_cents"]) / 100, 2), "image_url": row["image_url"],
+            "status": row["status"],
+            "created_at": datetime.fromtimestamp(int(row["created_at"]), timezone.utc).isoformat(),
+            "updated_at": int(row["updated_at"]),
+        }
+
+    def api_legitimate_products(self):
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products WHERE status = 'published' AND product_code IS NOT NULL "
+                "AND market <> '' AND state <> '' ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    def api_admin_legitimate_products_get(self):
+        if self._require_admin() is None:
+            return self._json(403, {"error": "Admins only."})
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, product_code, expiry, market, state, "
+                "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at "
+                "FROM legitimate_products ORDER BY id ASC"
+            ).fetchall()
+        return self._json(200, {"products": [self._legitimate_product_payload(row) for row in rows]})
+
+    @staticmethod
+    def _legitimate_country_codes():
+        return {
+            "united states": "US", "united kingdom": "GB", "canada": "CA",
+            "australia": "AU", "germany": "DE", "france": "FR", "india": "IN",
+        }
+
+    @staticmethod
+    def _legitimate_market_states():
+        return {
+            "united states": {"Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "District of Columbia"},
+            "united kingdom": {"England", "Scotland", "Wales", "Northern Ireland"},
+            "canada": {"Alberta", "British Columbia", "Manitoba", "New Brunswick", "Newfoundland and Labrador", "Northwest Territories", "Nova Scotia", "Nunavut", "Ontario", "Prince Edward Island", "Quebec", "Saskatchewan", "Yukon"},
+            "australia": {"Australian Capital Territory", "New South Wales", "Northern Territory", "Queensland", "South Australia", "Tasmania", "Victoria", "Western Australia"},
+            "germany": {"Baden-Württemberg", "Bavaria", "Berlin", "Brandenburg", "Bremen", "Hamburg", "Hesse", "Lower Saxony", "Mecklenburg-Vorpommern", "North Rhine-Westphalia", "Rhineland-Palatinate", "Saarland", "Saxony", "Saxony-Anhalt", "Schleswig-Holstein", "Thuringia"},
+            "france": {"Auvergne-Rhône-Alpes", "Bourgogne-Franche-Comté", "Brittany", "Centre-Val de Loire", "Corsica", "Grand Est", "Hauts-de-France", "Normandy", "Nouvelle-Aquitaine", "Occitanie", "Pays de la Loire", "Provence-Alpes-Côte d’Azur", "Île-de-France", "Guadeloupe", "Martinique", "French Guiana", "Réunion", "Mayotte"},
+            "india": {"Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry"},
+        }
+
+    def api_admin_import_legitimate_products(self, payload):
+        """Import the separate legitimate catalogue as drafts only."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        items = payload.get("products") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or not items:
+            return self._error(400, "Upload a CSV containing at least one product.")
+        if len(items) > 200:
+            return self._error(400, "A single import is limited to 200 products.")
+
+        country_codes = self._legitimate_country_codes()
+        clean_items, errors = [], []
+        for index, item in enumerate(items, start=2):
+            if not isinstance(item, dict):
+                errors.append({"row": index, "error": "Invalid row."})
+                continue
+            clean = {key: str(item.get(key, "")).strip() for key in (
+                "name", "market", "state", "format", "seller", "quality", "product_code",
+                "expiry", "status", "intended_country", "description"
+            )}
+            problem = None
+            if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+                problem = "Required fields are missing."
+            market_key = clean["market"].lower()
+            market_code = country_codes.get(market_key)
+            if not problem and (not market_code or clean["intended_country"].upper() != market_code):
+                problem = "Intended country must match the selected Market."
+            if not problem and clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+                problem = "State or province does not match the selected Market."
+            if not problem and clean["quality"] != "Very High":
+                problem = "Quality must be Very High."
+            if not problem and not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]):
+                problem = "ID must be six digits and begin with 42, 47, 51, 34, or 37."
+            if not problem and not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]):
+                problem = "Expiry must use MM/YYYY."
+            try:
+                refund = int(item.get("refund_period"))
+                if refund not in (0, 3):
+                    raise ValueError
+            except (TypeError, ValueError):
+                refund = 0
+                problem = problem or "Refund period must be 0 or 3."
+            try:
+                price = Decimal(str(item.get("price", "")).strip())
+                if not price.is_finite() or price < 0 or price > Decimal("99999999"):
+                    raise InvalidOperation
+                price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            except (InvalidOperation, ValueError, TypeError):
+                price_cents = 0
+                problem = problem or "Enter a valid non-negative price."
+            if problem:
+                errors.append({"row": index, "error": problem})
+                continue
+            clean_items.append((clean, refund, price_cents, index))
+
+        if not clean_items:
+            return self._json(400, {"error": "No valid rows to import.", "errors": errors})
+
+        now = int(time.time())
+        imported, duplicates, imported_ids = 0, [], []
+        with db(write=True) as conn:
+            for clean, refund, price_cents, row_number in clean_items:
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products "
+                    "(name, description, category, format, seller, quality, market, state, product_code, expiry, "
+                    "intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'draft', ?, ?, ?)",
+                    (clean["name"], clean["description"], clean["format"].lower(), clean["seller"], clean["quality"],
+                     clean["market"], clean["state"], clean["product_code"], clean["expiry"],
+                     clean["intended_country"].upper(), refund, price_cents, now, now, admin["id"]),
+                )
+                imported += 1
+                imported_ids.append(int(cursor.lastrowid))
+                audit(conn, "legitimate_product.import", actor=admin, target=str(cursor.lastrowid),
+                      detail="CSV import; forced draft; row=" + str(row_number), ip=self.client_address[0])
+        return self._json(200, {
+            "ok": True, "imported": imported, "imported_ids": imported_ids, "duplicates": duplicates,
+            "errors": errors, "message": "Import complete. Review and confirm publication of the newly imported rows."
+        })
+
+
+    def api_admin_publish_legitimate_import(self, payload):
+        """Publish only the rows returned by the immediately preceding CSV import."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not ids or len(ids) > 200:
+            return self._error(400, "Provide the imported product IDs to publish (1–200).")
+        try:
+            product_ids = [int(value) for value in ids]
+            if any(value < 1 for value in product_ids) or len(set(product_ids)) != len(product_ids):
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._error(400, "The imported product IDs are invalid.")
+        placeholders = ",".join("?" for _ in product_ids)
+        now = int(time.time())
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, market, state, product_code, expiry, "
+                "intended_country, refund_period, price_cents FROM legitimate_products "
+                "WHERE id IN (" + placeholders + ") AND status = 'draft'",
+                tuple(product_ids),
+            ).fetchall()
+            if len(rows) != len(product_ids):
+                return self._error(409, "Some imported rows are missing or are no longer drafts. Nothing was published.")
+            country_codes = self._legitimate_country_codes()
+            for row in rows:
+                market_key = str(row["market"]).lower()
+                if (not row["name"] or not row["description"] or not row["format"] or not row["seller"]
+                    or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
+                    or country_codes.get(market_key) != str(row["intended_country"]).upper()
+                    or row["state"] not in self._legitimate_market_states().get(market_key, set())
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", str(row["expiry"]))
+                    or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
+                    return self._error(409, "An imported row failed the publication checks. Nothing was published.")
+            conn.execute(
+                "UPDATE legitimate_products SET status = 'published', updated_at = ? "
+                "WHERE id IN (" + placeholders + ") AND status = 'draft'",
+                (now, *product_ids),
+            )
+            for product_id in product_ids:
+                audit(conn, "legitimate_product.publish", actor=admin, target=str(product_id),
+                      detail="published from validated CSV import; standalone catalogue", ip=self.client_address[0])
+        return self._json(200, {"ok": True, "published": len(product_ids), "ids": product_ids})
+
+    def api_admin_publish_all_legitimate_drafts(self, payload):
+        """Validate and publish every draft in the isolated legitimate catalogue atomically."""
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+
+        now = int(time.time())
+        with db(write=True) as conn:
+            rows = conn.execute(
+                "SELECT id, name, description, format, seller, quality, market, state, product_code, expiry, "
+                "intended_country, refund_period, price_cents FROM legitimate_products WHERE status = 'draft' "
+                "ORDER BY id"
+            ).fetchall()
+            if not rows:
+                return self._json(200, {"ok": True, "published": 0, "message": "There are no draft products."})
+
+            country_codes = self._legitimate_country_codes()
+            market_states = self._legitimate_market_states()
+            invalid_ids = []
+            for row in rows:
+                market_key = str(row["market"]).lower()
+                if (not row["name"] or not row["description"] or not row["format"] or not row["seller"]
+                    or row["quality"] != "Very High" or not row["product_code"] or not row["expiry"] or not row["state"]
+                    or country_codes.get(market_key) != str(row["intended_country"]).upper()
+                    or row["state"] not in market_states.get(market_key, set())
+                    or not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", str(row["product_code"]))
+                    or not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", str(row["expiry"]))
+                    or int(row["refund_period"]) not in (0, 3) or int(row["price_cents"]) < 0):
+                    invalid_ids.append(int(row["id"]))
+
+            if invalid_ids:
+                return self._json(409, {
+                    "error": "Some drafts failed publication checks. Nothing was published.",
+                    "invalid_count": len(invalid_ids),
+                    "invalid_ids": invalid_ids[:25],
+                })
+
+            conn.execute(
+                "UPDATE legitimate_products SET status = 'published', updated_at = ? WHERE status = 'draft'",
+                (now,),
+            )
+            for row in rows:
+                audit(conn, "legitimate_product.publish", actor=admin, target=str(row["id"]),
+                      detail="published from bulk publish-all; standalone catalogue", ip=self.client_address[0])
+
+        return self._json(200, {"ok": True, "published": len(rows), "message": "All validated drafts are now published."})
+
+    def api_admin_legitimate_products(self, payload):
+        admin = self._require_admin()
+        if admin is None:
+            return self._json(403, {"error": "Admins only."})
+        if not isinstance(payload, dict):
+            return self._error(400, "Invalid product request.")
+        if str(payload.get("action", "save")).strip().lower() == "delete":
+            try:
+                product_id = int(payload.get("id"))
+                if product_id < 1: raise ValueError
+            except (TypeError, ValueError):
+                return self._error(400, "A valid product ID is required.")
+            with db(write=True) as conn:
+                cursor = conn.execute("DELETE FROM legitimate_products WHERE id = ?", (product_id,))
+                if cursor.rowcount == 0: return self._error(404, "Product not found.")
+                audit(conn, "legitimate_product.delete", actor=admin, target=str(product_id),
+                      detail="standalone catalogue", ip=self.client_address[0])
+            return self._json(200, {"ok": True})
+
+        item = payload.get("product")
+        if not isinstance(item, dict): return self._error(400, "Product details are required.")
+        clean = {key: str(item.get(key, "")).strip() for key in (
+            "name", "market", "state", "format", "seller", "quality", "product_code",
+            "expiry", "intended_country", "description"
+        )}
+        if any(not clean[k] for k in ("name", "market", "state", "format", "seller", "product_code", "expiry", "intended_country", "description")):
+            return self._error(400, "All product fields are required.")
+        market_key = clean["market"].lower()
+        if market_key not in self._legitimate_country_codes() or clean["intended_country"].upper() != self._legitimate_country_codes()[market_key]:
+            return self._error(400, "Intended country must match Market.")
+        if clean["state"] not in self._legitimate_market_states().get(market_key, set()):
+            return self._error(400, "State or province does not match Market.")
+        if clean["quality"] != "Very High": return self._error(400, "Quality must be Very High.")
+        if not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
+        if not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]): return self._error(400, "Expiry must use MM/YYYY.")
+        try:
+            refund = int(item.get("refund_period"))
+            if refund not in (0, 3): raise ValueError
+            price = Decimal(str(item.get("price", "")).strip())
+            if not price.is_finite() or price < 0 or price > Decimal("99999999"): raise InvalidOperation
+            price_cents = int((price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except (InvalidOperation, ValueError, TypeError):
+            return self._error(400, "Enter a valid price and a refund period of 0 or 3.")
+        fmt = clean["format"].strip()
+        if not fmt: return self._error(400, "Enter a format.")
+        status = str(item.get("status", "draft")).strip().lower()
+        if status not in ("draft", "published"): return self._error(400, "Choose draft or published.")
+        try:
+            product_id = int(item.get("id")) if item.get("id") not in (None, "") else None
+            if product_id is not None and product_id < 1: raise ValueError
+        except (TypeError, ValueError): return self._error(400, "Invalid product ID.")
+        now = int(time.time())
+        values = (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                  clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                  refund, price_cents, status, now)
+        with db(write=True) as conn:
+            if product_id is None:
+                cursor = conn.execute(
+                    "INSERT INTO legitimate_products (name, description, category, format, seller, quality, market, state, "
+                    "product_code, expiry, intended_country, refund_period, price_cents, image_url, status, created_at, updated_at, created_by) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, now, admin["id"]),
+                )
+                product_id = cursor.lastrowid
+                audit_action = "legitimate_product.create"
+            else:
+                existing = conn.execute("SELECT id FROM legitimate_products WHERE id = ?", (product_id,)).fetchone()
+                if existing is None: return self._error(404, "Product not found.")
+                conn.execute(
+                    "UPDATE legitimate_products SET name = ?, description = ?, format = ?, seller = ?, quality = ?, "
+                    "market = ?, state = ?, product_code = ?, expiry = ?, intended_country = ?, refund_period = ?, "
+                    "price_cents = ?, status = ?, updated_at = ? WHERE id = ?",
+                    (clean["name"], clean["description"], fmt, clean["seller"], clean["quality"], clean["market"],
+                     clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
+                     refund, price_cents, status, now, product_id),
+                )
+                audit_action = "legitimate_product.update"
+            audit(conn, audit_action, actor=admin, target=str(product_id),
+                  detail="standalone catalogue; status=" + status, ip=self.client_address[0])
+        return self._json(200, {"ok": True, "id": product_id, "status": status})
+
+
+    # ---------------- static files ----------------
+
+    def serve_static(self, path):
+        rel = unquote(path).lstrip("/") or "index.html"
+
+        if rel in ADMIN_PAGES:
+            user = self._current_user()
+            if user is None:
+                return self._redirect(LOGIN_PATH + "?next=" + quote(rel, safe=""))
+            if user.get("role") != "admin":
+                # signed in, but not an admin: back to the shop
+                return self._redirect("index.html")
+
+        if rel in GATED_PAGES:
+            if self._current_user() is None:
+                # a guest is offered an account first; login.html is still there
+                # for people who already have one (and for the admin console)
+                location = SIGNUP_PATH
+                if rel != "index.html":
+                    # bare filename: the client refuses anything with a slash
+                    location += "?next=" + quote(rel, safe="")
+                return self._redirect(location)
+
+        name = rel.rsplit("/", 1)[-1]
+        if any(rel.startswith(prefix) for prefix in BLOCKED_PREFIXES):
+            return self._send(404, b"Not found", "text/plain; charset=utf-8")
+        if name in BLOCKED_NAMES or rel.lower().endswith(BLOCKED_SUFFIXES):
+            return self._send(404, b"Not found", "text/plain; charset=utf-8")
+
+        target = (WEB_ROOT / rel).resolve()
+        try:
+            target.relative_to(WEB_ROOT.resolve())
+        except ValueError:
+            return self._send(403, b"Forbidden", "text/plain; charset=utf-8")
+
+        if target.is_dir():
+            target = target / "index.html"
+        if not target.is_file():
+            return self._send(404, b"Not found", "text/plain; charset=utf-8")
+
+        content_type = CONTENT_TYPES.get(
+            target.suffix.lower(),
+            mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+        )
+        body = target.read_bytes()
+        stat = target.stat()
+        etag = '"%x-%x"' % (stat.st_mtime_ns, stat.st_size)
+
+        # pages are per-session, so never cache them; images and stylesheets
+        # may be cached and revalidated cheaply
+        if target.suffix.lower() == ".html":
+            cache = [("Cache-Control", "no-store")]
+        else:
+            cache = [("Cache-Control", "no-cache"), ("ETag", etag)]
+            if etag in (self.headers.get("If-None-Match") or ""):
+                return self._send(304, b"", None, cache)
+
+        csp = PREVIEW_CSP if rel.endswith("-preview.html") else None
+        self._send(200, body, content_type, cache, csp=csp)
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True          # a stuck request cannot hold up shutdown
+    allow_reuse_address = True
+    request_queue_size = 64
+
+
+def main():
+    init_db()
+
+    default_password = ADMIN_PASSWORD == DEFAULT_ADMIN_PASSWORD
+    if default_password and not ALLOW_DEFAULT_ADMIN:
+        print("")
+        print("  ! ---------------------------------------------------------------")
+        print("  !  The admin account is using the built-in password.")
+        print("  !  Set NL_ADMIN_PASSWORD to something private before anyone")
+        print("  !  else can reach this server, or start with")
+        print("  !  NL_ALLOW_DEFAULT_ADMIN=1 to silence this warning.")
+        print("  ! ---------------------------------------------------------------")
+        print("")
+
+    print("Northlight server")
+    print(f"  serving  {WEB_ROOT}")
+    if DB_KIND == "mysql":
+        print(
+            "  database mysql://{user}@{host}:{port}/{database}".format(**MYSQL)
+        )
+    else:
+        print(f"  database {DB_PATH}")
+    if HTTPS_ONLY:
+        print("  cookies  Secure + HSTS (NL_HTTPS=1)")
+    if STRICT_HEADERS:
+        print("  headers  frame-ancestors 'none' (NL_STRICT_HEADERS=1)")
+    print(f"  open     http://localhost:{PORT}/  (Ctrl+C to stop)")
+
+    server = Server((HOST, PORT), Handler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nshutting down")
+    finally:
+        server.server_close()
+        if DB_KIND == "sqlite":
+            try:
+                with db(write=True) as conn:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+
+
+if __name__ == "__main__":
+    main()
