@@ -953,15 +953,10 @@ def _ensure_legitimate_catalogue_columns(conn):
             "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
             ("legitimate_products", "legitimate_products_code"),
         ).fetchone()
-        if index is None:
-            conn.execute(
-                "CREATE UNIQUE INDEX legitimate_products_code ON legitimate_products(product_code)"
-            )
+        if index is not None:
+            conn.execute("ALTER TABLE legitimate_products DROP INDEX legitimate_products_code")
     else:
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS legitimate_products_code "
-            "ON legitimate_products(product_code)"
-        )
+        conn.execute("DROP INDEX IF EXISTS legitimate_products_code")
 
 
 def _migrate(conn):
@@ -1048,10 +1043,7 @@ def _migrate(conn):
         conn.execute("ALTER TABLE expensive_products ADD COLUMN exp_date TEXT")
     if "country_code" not in product_cols:
         conn.execute("ALTER TABLE expensive_products ADD COLUMN country_code TEXT")
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS expensive_products_product_id "
-        "ON expensive_products(product_id)"
-    )
+    conn.execute("DROP INDEX IF EXISTS expensive_products_product_id")
     _ensure_expensive_catalogue_dates(conn)
 
     conn.executescript(EXPENSIVE_PRODUCT_ORDERS_TABLE)
@@ -1251,7 +1243,6 @@ def init_mysql():
             "price_cents BIGINT NOT NULL, image_url VARCHAR(1000) NOT NULL DEFAULT '', "
             "status VARCHAR(20) NOT NULL DEFAULT 'draft', "
             "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, created_by INT UNSIGNED NULL, "
-            "UNIQUE KEY legitimate_products_code (product_code), "
             "KEY legitimate_products_public (status, created_at, id), "
             "CONSTRAINT legitimate_products_price_positive CHECK (price_cents >= 0), "
             "CONSTRAINT legitimate_products_status CHECK (status IN ('draft', 'published'))"
@@ -1329,11 +1320,8 @@ def init_mysql():
             "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
             ("expensive_products", "expensive_products_product_id"),
         ).fetchone()
-        if product_id_index is None:
-            conn.execute(
-                "CREATE UNIQUE INDEX expensive_products_product_id "
-                "ON expensive_products(product_id)"
-            )
+        if product_id_index is not None:
+            conn.execute("ALTER TABLE expensive_products DROP INDEX expensive_products_product_id")
 
         _seed_admin(conn)
         dropped = prune_sessions(conn)
@@ -3196,7 +3184,6 @@ class Handler(BaseHTTPRequestHandler):
 
         cleaned = []
         errors = []
-        seen_product_ids = set()
 
         for index, item in enumerate(items, start=1):
             if not isinstance(item, dict):
@@ -3253,10 +3240,7 @@ class Handler(BaseHTTPRequestHandler):
                     errors.append(f"Product {index}: Product ID is required.")
                 elif len(public_id) > 64:
                     errors.append(f"Product {index}: Product ID must be 64 characters or fewer.")
-                elif public_id in seen_product_ids:
-                    errors.append(f"Product {index}: duplicate Product ID in this submission.")
                 else:
-                    seen_product_ids.add(public_id)
                     product["product_id"] = public_id
 
             expiry, expiry_error = parse_exp_date(item.get("expDate"))
@@ -3288,16 +3272,6 @@ class Handler(BaseHTTPRequestHandler):
         now = int(time.time())
 
         with db(write=True) as conn:
-            for product in cleaned:
-                duplicate = conn.execute(
-                    "SELECT 1 FROM expensive_products WHERE product_id = ?",
-                    (product["product_id"],),
-                ).fetchone()
-                if duplicate is not None:
-                    return self._json(
-                        409, {"error": f"Product ID {product['product_id']} is already in use."}
-                    )
-
             created_ids = []
 
             for product in cleaned:
@@ -3847,15 +3821,6 @@ class Handler(BaseHTTPRequestHandler):
 
             if existing is None:
                 return self._json(404, {"error": "Product not found."})
-
-            duplicate = conn.execute(
-                "SELECT 1 FROM expensive_products WHERE product_id = ? AND id <> ?",
-                (product["product_id"], product_id),
-            ).fetchone()
-            if duplicate is not None:
-                return self._json(
-                    409, {"error": f"Product ID {product['product_id']} is already in use."}
-                )
 
             conn.execute(
                 "UPDATE expensive_products SET "
@@ -5405,7 +5370,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "A single import is limited to 200 products.")
 
         country_codes = self._legitimate_country_codes()
-        clean_items, errors, seen_codes = [], [], set()
+        clean_items, errors = [], []
         for index, item in enumerate(items, start=2):
             if not isinstance(item, dict):
                 errors.append({"row": index, "error": "Invalid row."})
@@ -5427,8 +5392,6 @@ class Handler(BaseHTTPRequestHandler):
                 problem = "Quality must be Very High."
             if not problem and not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]):
                 problem = "ID must be six digits and begin with 42, 47, 51, 34, or 37."
-            if not problem and clean["product_code"] in seen_codes:
-                problem = "Duplicate ID in this CSV."
             if not problem and not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]):
                 problem = "Expiry must use MM/YYYY."
             try:
@@ -5449,7 +5412,6 @@ class Handler(BaseHTTPRequestHandler):
             if problem:
                 errors.append({"row": index, "error": problem})
                 continue
-            seen_codes.add(clean["product_code"])
             clean_items.append((clean, refund, price_cents, index))
 
         if not clean_items:
@@ -5459,12 +5421,6 @@ class Handler(BaseHTTPRequestHandler):
         imported, duplicates, imported_ids = 0, [], []
         with db(write=True) as conn:
             for clean, refund, price_cents, row_number in clean_items:
-                exists = conn.execute(
-                    "SELECT id FROM legitimate_products WHERE product_code = ?", (clean["product_code"],)
-                ).fetchone()
-                if exists:
-                    duplicates.append({"row": row_number, "name": clean["name"], "reason": "Duplicate product ID."})
-                    continue
                 cursor = conn.execute(
                     "INSERT INTO legitimate_products "
                     "(name, description, category, format, seller, quality, market, state, product_code, expiry, "
@@ -5633,11 +5589,6 @@ class Handler(BaseHTTPRequestHandler):
                   clean["state"], clean["product_code"], clean["expiry"], clean["intended_country"].upper(),
                   refund, price_cents, status, now)
         with db(write=True) as conn:
-            duplicate = conn.execute(
-                "SELECT id FROM legitimate_products WHERE product_code = ? AND id != ?",
-                (clean["product_code"], product_id or -1),
-            ).fetchone()
-            if duplicate: return self._error(409, "That product ID is already in use.")
             if product_id is None:
                 cursor = conn.execute(
                     "INSERT INTO legitimate_products (name, description, category, format, seller, quality, market, state, "
