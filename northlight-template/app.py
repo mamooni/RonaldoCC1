@@ -5643,7 +5643,7 @@ class Handler(BaseHTTPRequestHandler):
         if clean["state"] not in self._legitimate_market_states().get(market_key, set()):
             return self._error(400, "State or province does not match Market.")
         if clean["quality"] != "Very High": return self._error(400, "Quality must be Very High.")
-        if not re.fullmatch(r"(?:42|47|51|34|37)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
+        if not re.fullmatch(r"(?:42|47|51|34|37|55|48)\d{4}", clean["product_code"]): return self._error(400, "ID must be six digits with an approved prefix.")
         if not re.fullmatch(r"(?:0[1-9]|1[0-2])/\d{4}", clean["expiry"]): return self._error(400, "Expiry must use MM/YYYY.")
         try:
             refund = int(item.get("refund_period"))
