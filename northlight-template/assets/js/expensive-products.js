@@ -219,7 +219,7 @@
         window.alert("Cart unavailable. Please refresh the page.");
         return;
       }
-      window.NLExpensiveCart.add({ key: String(product.id), title: product.name, price: product.price });
+      window.NLExpensiveCart.add({ id: product.id, title: product.name });
       event.currentTarget.textContent = "Added";
       event.currentTarget.disabled = true;
     }));
