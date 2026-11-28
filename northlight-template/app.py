@@ -4848,7 +4848,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if len(product_map) != len(product_ids):
                 return self._json(404, {
-                    "error": "One or more products are no longer available."
+                    "error": "Insufficient funds, fund your wallet and try again."
                 })
 
             total_cents = 0
@@ -5156,7 +5156,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if len(product_map) != len(product_ids):
                 return self._json(404, {
-                    "error": "One or more products are no longer available."
+                    "error": "insufficient funds, fund your account and try again"."
                 })
 
             total_cents = 0
