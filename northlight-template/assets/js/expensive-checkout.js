@@ -162,7 +162,7 @@
       itemsList.appendChild(li);
     });
 
-    totalText.textContent = "The final price will be calculated securely by Northlight.";
+    totalText.textContent = "The final price will be calculated securely by Ronaldo CC.";
     summary.hidden = false;
     loading.hidden = true;
   }
