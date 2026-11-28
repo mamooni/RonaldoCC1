@@ -82,7 +82,7 @@
       return;
     }
 
-    window.location.href = "checkout.html?cart=1";
+    window.location.href = "expensive-checkout.html?cart=1";
   });
 
   renderCart();
