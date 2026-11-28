@@ -211,15 +211,15 @@
 
     actionGroup.appendChild(makeButton("Buy", "btn btn--primary", function () {
       if (!product.id) return;
-      window.location.href = "legitimate-checkout.html?product=" + encodeURIComponent(product.id);
+      window.location.href = "expensive-checkout.html?product=" + encodeURIComponent(product.id);
     }));
 
     actionGroup.appendChild(makeButton("Add", "btn btn--wallet", function (event) {
-      if (!window.NLLegitCart) {
+      if (!window.NLExpensiveCart) {
         window.alert("Cart unavailable. Please refresh the page.");
         return;
       }
-      window.NLLegitCart.add({ key: String(product.id), title: product.name, price: product.price });
+      window.NLExpensiveCart.add({ key: String(product.id), title: product.name, price: product.price });
       event.currentTarget.textContent = "Added";
       event.currentTarget.disabled = true;
     }));
